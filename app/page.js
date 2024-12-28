@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import TranslationsCarousel from './components/TranslationsCarousel'
+import Tooltip from './components/Tooltip'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -23,7 +24,12 @@ export default function Home() {
   const [imageAnalysis, setImageAnalysis] = useState('')
   const [translationHistory, setTranslationHistory] = useState([])
   const [activeTab, setActiveTab] = useState('current')
-  
+  const [footnoteText, setFootnoteText] = useState('')
+  const [footnotePosition, setFootnotePosition] = useState({ x: 0, y: 0 })
+  const [showFootnote, setShowFootnote] = useState(false)
+  const [footnotesHistory, setFootnotesHistory] = useState({})
+  const [footnoteCounter, setFootnoteCounter] = useState(1)
+
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
   const textLayerRef = useRef(null)
@@ -356,6 +362,196 @@ export default function Home() {
     }
   }, [])
 
+  // Add footnote handler
+  const handleFootnote = (event) => {
+    const selection = window.getSelection()
+    const text = selection.toString().trim()
+    
+    if (text) {
+      const range = selection.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const container = textLayerRef.current.getBoundingClientRect()
+
+      setFootnotePosition({
+        x: rect.left + rect.width / 2 - container.left,
+        y: rect.bottom - container.top,
+      })
+      setFootnoteText(text)
+      setShowFootnote(true)
+    }
+  }
+
+  // Add footnote handler for the button
+  const handleFootnoteButton = async () => {
+    if (!selectedText) return
+    
+    setShowMenu(false)
+    const range = window.getSelection().getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    const container = textLayerRef.current.getBoundingClientRect()
+
+    // Create marker element
+    const marker = document.createElement('sup')
+    marker.className = 'footnote-marker text-xs text-blue-500 cursor-pointer select-none'
+    marker.textContent = `[${footnoteCounter}]`
+    marker.style.position = 'absolute'
+    marker.style.zIndex = '30'
+    
+    // Position the marker
+    const markerPosition = {
+      left: rect.right - container.left,
+      top: rect.top - container.top,
+    }
+    
+    marker.style.left = `${markerPosition.left}px`
+    marker.style.top = `${markerPosition.top}px`
+    
+    // Add hover and click handlers
+    marker.addEventListener('mouseenter', () => {
+      setFootnotePosition({
+        x: rect.left + rect.width / 2 - container.left,
+        y: rect.bottom - container.top,
+      })
+      setFootnoteText(selectedText)
+      setShowFootnote(true)
+    })
+    
+    marker.addEventListener('mouseleave', () => {
+      if (!showFootnote) return
+      setShowFootnote(false)
+    })
+
+    // Add to text layer
+    textLayerRef.current.appendChild(marker)
+
+    // Store position data
+    const position = {
+      x: rect.left + rect.width / 2 - container.left,
+      y: rect.bottom - container.top,
+      absoluteTop: rect.top + window.scrollY,
+      textLayerTop: container.top + window.scrollY,
+      marker: {
+        left: markerPosition.left,
+        top: markerPosition.top,
+      }
+    }
+
+    // Update footnotes history
+    setFootnotesHistory(prev => ({
+      ...prev,
+      [selectedText]: {
+        position,
+        pageNumber: currentPage,
+        timestamp: new Date().toISOString(),
+        markerId: footnoteCounter
+      }
+    }))
+
+    setFootnoteCounter(prev => prev + 1)
+  }
+
+  // Add function to restore markers when changing pages
+  useEffect(() => {
+    // Clear existing markers
+    const existingMarkers = textLayerRef.current?.querySelectorAll('.footnote-marker')
+    existingMarkers?.forEach(marker => marker.remove())
+
+    // Restore markers for current page
+    Object.entries(footnotesHistory).forEach(([text, data]) => {
+      if (data.pageNumber === currentPage) {
+        const marker = document.createElement('sup')
+        marker.className = 'footnote-marker text-xs text-blue-500 cursor-pointer select-none'
+        marker.textContent = `[${data.markerId}]`
+        marker.style.position = 'absolute'
+        marker.style.zIndex = '30'
+        marker.style.left = `${data.position.marker.left}px`
+        marker.style.top = `${data.position.marker.top}px`
+
+        marker.addEventListener('mouseenter', () => {
+          setFootnotePosition({
+            x: data.position.x,
+            y: data.position.y,
+          })
+          setFootnoteText(text)
+          setShowFootnote(true)
+        })
+
+        marker.addEventListener('mouseleave', () => {
+          if (!showFootnote) return
+          setShowFootnote(false)
+        })
+
+        textLayerRef.current?.appendChild(marker)
+      }
+    })
+  }, [currentPage, footnotesHistory])
+
+  // Add scroll to reference function
+  const scrollToReference = (text, data) => {
+    // First ensure we're on the right page
+    if (currentPage !== data.pageNumber) {
+      setCurrentPage(data.pageNumber)
+      // Wait for page render
+      setTimeout(() => {
+        window.scrollTo({
+          top: data.position.absoluteTop - 100, // Offset for better visibility
+          behavior: 'smooth'
+        })
+        // Highlight the reference temporarily
+        highlightReference(text)
+      }, 300) // Adjust timeout based on page render time
+    } else {
+      window.scrollTo({
+        top: data.position.absoluteTop - 100,
+        behavior: 'smooth'
+      })
+      highlightReference(text)
+    }
+  }
+
+  // Add highlight function
+  const highlightReference = (text) => {
+    const textLayer = textLayerRef.current
+    if (!textLayer) return
+
+    // Create highlight overlay
+    const highlight = document.createElement('div')
+    highlight.className = 'absolute bg-yellow-200 bg-opacity-50 transition-opacity duration-1000'
+    highlight.style.zIndex = '40'
+    
+    // Position the highlight
+    const textNodes = Array.from(textLayer.childNodes)
+    for (const node of textNodes) {
+      if (node.textContent.includes(text)) {
+        const rect = node.getBoundingClientRect()
+        highlight.style.left = `${rect.left - textLayer.getBoundingClientRect().left}px`
+        highlight.style.top = `${rect.top - textLayer.getBoundingClientRect().top}px`
+        highlight.style.width = `${rect.width}px`
+        highlight.style.height = `${rect.height}px`
+        textLayer.appendChild(highlight)
+        
+        // Fade out and remove after animation
+        setTimeout(() => {
+          highlight.style.opacity = '0'
+          setTimeout(() => highlight.remove(), 1000)
+        }, 2000)
+        break
+      }
+    }
+  }
+
+  // Update the text layer to show stored footnotes on hover
+  const handleTextHover = (event) => {
+    const selection = window.getSelection()
+    const text = selection.toString().trim()
+    
+    if (text && footnotesHistory[text]) {
+      setFootnotePosition(footnotesHistory[text].position)
+      setFootnoteText(text)
+      setShowFootnote(true)
+    }
+  }
+
   return (
     <main className="min-h-screen flex">
       {/* Main content area */}
@@ -446,6 +642,8 @@ export default function Home() {
                   pointerEvents: 'none',
                 }}
                 onMouseUp={handleTextSelection}
+                onMouseMove={handleTextHover}
+                onMouseLeave={() => setShowFootnote(false)}
               />
               
               {/* Loading Overlay */}
@@ -505,6 +703,12 @@ export default function Home() {
                         'Analyze'
                       )}
                     </button>
+                    <button
+                      onClick={handleFootnoteButton}
+                      className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                    >
+                      Footnote
+                    </button>
                   </div>
                 </div>
               )}
@@ -537,6 +741,16 @@ export default function Home() {
               }`}
             >
               History
+            </button>
+            <button
+              onClick={() => setActiveTab('footnotes')}
+              className={`px-4 py-2 ${
+                activeTab === 'footnotes'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500'
+              }`}
+            >
+              Footnotes
             </button>
           </div>
 
@@ -628,8 +842,61 @@ export default function Home() {
             // Translation history
             <TranslationsCarousel translations={translationHistory} />
           )}
+
+          {/* Add footnotes content */}
+          {activeTab === 'footnotes' && (
+            <div className="space-y-4">
+              <h3 className="font-bold text-gray-700">Saved Footnotes</h3>
+              {Object.entries(footnotesHistory)
+                .sort((a, b) => a[1].markerId - b[1].markerId)
+                .map(([text, data]) => (
+                  <div key={text} className="border-b pb-4">
+                    <div className="flex justify-between items-start">
+                      <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                        <span className="text-blue-500">[{data.markerId}]</span>
+                        Page {data.pageNumber}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {new Date(data.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{text}</p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => {
+                          setFootnotePosition(data.position)
+                          setFootnoteText(text)
+                          setShowFootnote(true)
+                        }}
+                        className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                      >
+                        Show Footnote
+                      </button>
+                      <button
+                        onClick={() => scrollToReference(text, data)}
+                        className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                        </svg>
+                        Jump to Reference
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Add Tooltip */}
+      {showFootnote && (
+        <Tooltip
+          text={footnoteText}
+          position={footnotePosition}
+          onClose={() => setShowFootnote(false)}
+        />
+      )}
     </main>
   )
 }

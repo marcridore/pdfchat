@@ -118,3 +118,17 @@ body {
   background: rgba(0, 123, 255, 0.3) !important;
   color: transparent;
 }
+
+/* Add these styles */
+.textLayer {
+  pointer-events: none;
+}
+
+.footnote-marker {
+  pointer-events: auto !important;
+  transition: transform 0.2s;
+}
+
+.footnote-marker:hover {
+  transform: scale(1.2);
+}
