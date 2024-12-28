@@ -28,6 +28,7 @@ export default function Home() {
   const fileInputRef = useRef(null)
   const textLayerRef = useRef(null)
   const pdfDocRef = useRef(null)
+  const menuRef = useRef(null)
 
   // Load PDF document
   const loadPDF = async (file) => {
@@ -338,6 +339,23 @@ export default function Home() {
     setTranslatedText('')
   }
 
+  // Add useEffect for click outside handling
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setShowMenu(false)
+      }
+    }
+
+    // Add event listener
+    document.addEventListener('mousedown', handleClickOutside)
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+
   return (
     <main className="min-h-screen flex">
       {/* Main content area */}
@@ -443,6 +461,7 @@ export default function Home() {
               {/* Selection Menu */}
               {showMenu && (
                 <div
+                  ref={menuRef}
                   className="absolute bg-white shadow-lg rounded-lg p-2 z-50 transform -translate-x-1/2"
                   style={{
                     left: menuPosition.x,
