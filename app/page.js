@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
+import TranslationsCarousel from './components/TranslationsCarousel'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -20,6 +21,8 @@ export default function Home() {
   const [analysis, setAnalysis] = useState('')
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
   const [imageAnalysis, setImageAnalysis] = useState('')
+  const [translationHistory, setTranslationHistory] = useState([])
+  const [activeTab, setActiveTab] = useState('current')
   
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -199,6 +202,15 @@ export default function Home() {
 
       const data = await response.json()
       setTranslatedText(data.translatedText)
+      
+      // Add to history
+      setTranslationHistory(prev => [...prev, {
+        originalText: selectedText,
+        translatedText: data.translatedText,
+        language: targetLanguage,
+        pageNumber: currentPage,
+        timestamp: new Date().toISOString(),
+      }])
     } catch (error) {
       console.error('Translation error:', error)
       setTranslatedText('Error translating text')
@@ -461,84 +473,117 @@ export default function Home() {
       {/* Right sidebar */}
       <div className="w-96 border-l bg-white p-4 h-screen sticky top-0 overflow-y-auto">
         <div className="space-y-6">
-          {/* Translation Settings */}
-          <div className="mb-4">
-            <h2 className="text-lg font-bold mb-2">Translation Settings</h2>
-            <select
-              value={targetLanguage}
-              onChange={handleLanguageChange}
-              className="w-full border rounded p-2"
+          {/* Tab Navigation */}
+          <div className="flex border-b">
+            <button
+              onClick={() => setActiveTab('current')}
+              className={`px-4 py-2 ${
+                activeTab === 'current'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500'
+              }`}
             >
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-            </select>
+              Current
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-2 ${
+                activeTab === 'history'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500'
+              }`}
+            >
+              History
+            </button>
           </div>
 
-          {/* Selected Text */}
-          {selectedText && (
-            <div className="border-b pb-4">
-              <h3 className="font-bold text-gray-700">Selected Text:</h3>
-              <p className="p-2 bg-gray-50 rounded border mt-1">{selectedText}</p>
-            </div>
-          )}
+          {/* Tab Content */}
+          {activeTab === 'current' ? (
+            // Current translation content
+            <div className="space-y-6">
+              {/* Translation Settings */}
+              <div className="mb-4">
+                <h2 className="text-lg font-bold mb-2">Translation Settings</h2>
+                <select
+                  value={targetLanguage}
+                  onChange={handleLanguageChange}
+                  className="w-full border rounded p-2"
+                >
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="it">Italian</option>
+                  <option value="pt">Portuguese</option>
+                </select>
+              </div>
 
-          {/* Translation Results */}
-          {selectedText && (
-            <div className="border-b pb-4">
-              <h3 className="font-bold text-gray-700">Translation:</h3>
-              {isTranslating ? (
-                <div className="p-2 bg-gray-50 rounded border mt-1">
-                  <p className="text-gray-600">Translating...</p>
-                </div>
-              ) : (
-                translatedText && (
-                  <p className="p-2 bg-gray-50 rounded border mt-1">{translatedText}</p>
-                )
-              )}
-            </div>
-          )}
-
-          {/* Analysis Results */}
-          {selectedText && (
-            <div>
-              <h3 className="font-bold text-gray-700">Analysis:</h3>
-              {isAnalyzing ? (
-                <div className="p-2 bg-gray-50 rounded border mt-1">
-                  <p className="text-gray-600">Analyzing...</p>
-                </div>
-              ) : (
-                analysis && (
-                  <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
-                    <p className="whitespace-pre-line">{analysis}</p>
-                  </div>
-                )
-              )}
-            </div>
-          )}
-
-          {/* Image Analysis Results */}
-          {imageAnalysis && (
-            <div className="border-t pt-4 mt-4">
-              <h3 className="font-bold text-gray-700">Page Analysis:</h3>
-              {isAnalyzingImage ? (
-                <div className="p-2 bg-gray-50 rounded border mt-1">
-                  <p className="text-gray-600">Analyzing current view...</p>
-                </div>
-              ) : (
-                <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
-                  <p className="whitespace-pre-line">{imageAnalysis}</p>
+              {/* Selected Text */}
+              {selectedText && (
+                <div className="border-b pb-4">
+                  <h3 className="font-bold text-gray-700">Selected Text:</h3>
+                  <p className="p-2 bg-gray-50 rounded border mt-1">{selectedText}</p>
                 </div>
               )}
-            </div>
-          )}
 
-          {!selectedText && (
-            <div className="text-gray-500 text-center mt-8">
-              Select text from the PDF to see translation and analysis
+              {/* Translation Results */}
+              {selectedText && (
+                <div className="border-b pb-4">
+                  <h3 className="font-bold text-gray-700">Translation:</h3>
+                  {isTranslating ? (
+                    <div className="p-2 bg-gray-50 rounded border mt-1">
+                      <p className="text-gray-600">Translating...</p>
+                    </div>
+                  ) : (
+                    translatedText && (
+                      <p className="p-2 bg-gray-50 rounded border mt-1">{translatedText}</p>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* Analysis Results */}
+              {selectedText && (
+                <div>
+                  <h3 className="font-bold text-gray-700">Analysis:</h3>
+                  {isAnalyzing ? (
+                    <div className="p-2 bg-gray-50 rounded border mt-1">
+                      <p className="text-gray-600">Analyzing...</p>
+                    </div>
+                  ) : (
+                    analysis && (
+                      <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
+                        <p className="whitespace-pre-line">{analysis}</p>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* Image Analysis Results */}
+              {imageAnalysis && (
+                <div className="border-t pt-4 mt-4">
+                  <h3 className="font-bold text-gray-700">Page Analysis:</h3>
+                  {isAnalyzingImage ? (
+                    <div className="p-2 bg-gray-50 rounded border mt-1">
+                      <p className="text-gray-600">Analyzing current view...</p>
+                    </div>
+                  ) : (
+                    <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
+                      <p className="whitespace-pre-line">{imageAnalysis}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!selectedText && (
+                <div className="text-gray-500 text-center mt-8">
+                  Select text from the PDF to see translation and analysis
+                </div>
+              )}
             </div>
+          ) : (
+            // Translation history
+            <TranslationsCarousel translations={translationHistory} />
           )}
         </div>
       </div>
