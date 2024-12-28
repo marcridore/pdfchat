@@ -123,6 +123,7 @@ export default function Home() {
       const text = selection.toString().trim()
       
       if (text) {
+        resetOutputs()
         const range = selection.getRangeAt(0)
         const rect = range.getBoundingClientRect()
         const container = textLayerRef.current.getBoundingClientRect()
@@ -142,11 +143,19 @@ export default function Home() {
     }, 10)
   }
 
+  // Add new function to reset outputs
+  const resetOutputs = () => {
+    setTranslatedText('')
+    setAnalysis('')
+    setImageAnalysis('')
+  }
+
   // Handle translation
   const handleTranslate = async () => {
     if (!selectedText) return
     
     setIsTranslating(true)
+    resetOutputs()
     try {
       const response = await fetch('/api/translate', {
         method: 'POST',
@@ -179,6 +188,7 @@ export default function Home() {
     if (!selectedText) return
     
     setIsAnalyzing(true)
+    resetOutputs()
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -209,6 +219,7 @@ export default function Home() {
   const handleScreenshotAnalysis = async () => {
     try {
       setIsAnalyzingImage(true)
+      resetOutputs()
       
       // Create a canvas to capture the current view
       const canvas = document.createElement('canvas')
