@@ -452,15 +452,39 @@ export default function Home() {
                   <div className="flex gap-2">
                     <button
                       onClick={handleTranslate}
-                      className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                      disabled={isTranslating}
+                      className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                        isTranslating
+                          ? 'bg-blue-300 cursor-not-allowed'
+                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }`}
                     >
-                      Translate
+                      {isTranslating ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <span>Translating...</span>
+                        </>
+                      ) : (
+                        'Translate'
+                      )}
                     </button>
                     <button
                       onClick={handleAnalyze}
-                      className="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600"
+                      disabled={isAnalyzing}
+                      className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                        isAnalyzing
+                          ? 'bg-green-300 cursor-not-allowed'
+                          : 'bg-green-500 hover:bg-green-600 text-white'
+                      }`}
                     >
-                      Analyze
+                      {isAnalyzing ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <span>Analyzing...</span>
+                        </>
+                      ) : (
+                        'Analyze'
+                      )}
                     </button>
                   </div>
                 </div>
