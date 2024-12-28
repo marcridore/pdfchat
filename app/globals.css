@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.text-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1.0;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  cursor: text !important;
+  z-index: 1;
+}
+
+.text-layer > span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text !important;
+  transform-origin: 0% 0%;
+  pointer-events: all !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+}
+
+.pdf-container {
+  position: relative;
+  background-color: #e4e4e4;
+  overflow: auto;
+}
+
+::selection {
+  background: rgba(0, 123, 255, 0.3);
+}
+
+/* Add these styles for the text layer */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  user-select: text;
+  cursor: text;
+}
+
+.textLayer > span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  pointer-events: all;
+  user-select: text !important;
+  cursor: text;
+  margin: 1px 0;
+  min-height: 1em;
+}
+
+/* Improve text selection highlighting */
+.textLayer > span::selection {
+  background: rgba(0, 123, 255, 0.3) !important;
+}
+
+/* Hide any duplicate text layers */
+.text-layer {
+  display: none;
+}
+
+/* Container styles */
+.pdf-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: #e0e0e0;
+  min-height: 100%;
+}
+
+/* Add styles for text selection */
+::selection {
+  background: rgba(0, 123, 255, 0.3) !important;
+  color: transparent;
+}
+::-moz-selection {
+  background: rgba(0, 123, 255, 0.3) !important;
+  color: transparent;
+}
