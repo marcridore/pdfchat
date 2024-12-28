@@ -29,6 +29,14 @@ export default function Home() {
   // Load PDF document
   const loadPDF = async (file) => {
     try {
+      // Clean up previous PDF and canvas
+      if (pdfDocRef.current) {
+        pdfDocRef.current.destroy()
+        pdfDocRef.current = null
+      }
+      cleanupCanvas()
+      resetOutputs() // Reset any previous outputs
+
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       pdfDocRef.current = pdf
@@ -45,7 +53,11 @@ export default function Home() {
     const canvas = canvasRef.current
     if (canvas) {
       const context = canvas.getContext('2d')
+      // Clear the entire canvas
       context.clearRect(0, 0, canvas.width, canvas.height)
+      // Reset canvas dimensions
+      canvas.width = 0
+      canvas.height = 0
     }
     if (textLayerRef.current) {
       textLayerRef.current.innerHTML = ''
@@ -57,25 +69,29 @@ export default function Home() {
     if (!pdfDocRef.current) return
 
     try {
+      // Ensure previous operations are cleaned up
       cleanupCanvas()
 
       const page = await pdfDocRef.current.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       
-      // Setup canvas
       const canvas = canvasRef.current
       const context = canvas.getContext('2d')
       
+      // Set canvas dimensions
       canvas.height = viewport.height
       canvas.width = viewport.width
 
-      // Render PDF page
-      await page.render({
+      // Create a new render task
+      const renderTask = page.render({
         canvasContext: context,
         viewport,
-      }).promise
+      })
 
-      // Setup text layer with correct positioning
+      // Wait for render to complete
+      await renderTask.promise
+
+      // Setup text layer
       const textContent = await page.getTextContent()
       const textLayer = textLayerRef.current
       if (textLayer) {
@@ -83,7 +99,7 @@ export default function Home() {
         textLayer.style.width = `${viewport.width}px`
         textLayer.innerHTML = ''
 
-        // Create text layer with proper text positioning
+        // Create text layer
         const textDivs = []
         pdfjsLib.renderTextLayer({
           textContent,
@@ -93,7 +109,7 @@ export default function Home() {
           enhanceTextSelection: true,
         })
 
-        // Add padding to text elements for better selection
+        // Add padding to text elements
         setTimeout(() => {
           const spans = textLayer.getElementsByTagName('span')
           for (const span of spans) {
@@ -111,6 +127,15 @@ export default function Home() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0]
     if (file && file.type === 'application/pdf') {
+      // Clear previous states
+      setPdfFile(null)
+      setNumPages(0)
+      setCurrentPage(1)
+      setScale(1.5)
+      setSelectedText('')
+      setShowMenu(false)
+      
+      // Load new PDF
       setPdfFile(file)
       loadPDF(file)
     }
@@ -279,6 +304,7 @@ export default function Home() {
       cleanupCanvas()
       if (pdfDocRef.current) {
         pdfDocRef.current.destroy()
+        pdfDocRef.current = null
       }
     }
   }, [])
@@ -292,6 +318,13 @@ export default function Home() {
       cleanupCanvas()
     }
   }, [currentPage, scale])
+
+  // Update the language change handler
+  const handleLanguageChange = (e) => {
+    setTargetLanguage(e.target.value)
+    // Clear previous translation when language changes
+    setTranslatedText('')
+  }
 
   return (
     <main className="min-h-screen flex">
@@ -318,7 +351,7 @@ export default function Home() {
             
             <select
               value={targetLanguage}
-              onChange={(e) => setTargetLanguage(e.target.value)}
+              onChange={handleLanguageChange}
               className="border rounded p-2"
             >
               <option value="es">Spanish</option>
@@ -361,9 +394,14 @@ export default function Home() {
 
             <button
               onClick={handleScreenshotAnalysis}
-              className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+              disabled={isAnalyzingImage}
+              className={`px-4 py-2 rounded transition-colors ${
+                isAnalyzingImage 
+                ? 'bg-purple-300 cursor-not-allowed' 
+                : 'bg-purple-500 hover:bg-purple-600'
+              } text-white`}
             >
-              Analyze Current View
+              {isAnalyzingImage ? 'Analyzing...' : 'Analyze Current View'}
             </button>
           </div>
 
@@ -375,10 +413,20 @@ export default function Home() {
                 ref={textLayerRef}
                 className="absolute top-0 left-0 right-0 bottom-0 textLayer"
                 style={{
-                  pointerEvents: 'none', // Let clicks pass through to text elements
+                  pointerEvents: 'none',
                 }}
                 onMouseUp={handleTextSelection}
               />
+              
+              {/* Loading Overlay */}
+              {isAnalyzingImage && (
+                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white rounded-lg p-4 flex flex-col items-center">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mb-2"></div>
+                    <p className="text-sm text-gray-600">Analyzing current view...</p>
+                  </div>
+                </div>
+              )}
               
               {/* Selection Menu */}
               {showMenu && (
@@ -418,7 +466,7 @@ export default function Home() {
             <h2 className="text-lg font-bold mb-2">Translation Settings</h2>
             <select
               value={targetLanguage}
-              onChange={(e) => setTargetLanguage(e.target.value)}
+              onChange={handleLanguageChange}
               className="w-full border rounded p-2"
             >
               <option value="es">Spanish</option>
