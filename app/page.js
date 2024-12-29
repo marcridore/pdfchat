@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import TranslationsCarousel from './components/TranslationsCarousel'
 import Tooltip from './components/Tooltip'
+import ChatModal from './components/ChatModal'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -29,6 +30,14 @@ export default function Home() {
   const [showFootnote, setShowFootnote] = useState(false)
   const [footnotesHistory, setFootnotesHistory] = useState({})
   const [footnoteCounter, setFootnoteCounter] = useState(1)
+  const [similarPassages, setSimilarPassages] = useState([])
+  const [isSearchingSimilar, setIsSearchingSimilar] = useState(false)
+  const [isStoringEmbeddings, setIsStoringEmbeddings] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [chatHistory, setChatHistory] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [isChatLoading, setIsChatLoading] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -54,7 +63,7 @@ export default function Home() {
       setCurrentPage(1)
       renderPage(1)
     } catch (error) {
-      console.error('Error loading PDF:', error)
+      // console.error('Error loading PDF:', error)
     }
   }
 
@@ -109,6 +118,36 @@ export default function Home() {
         textLayer.style.width = `${viewport.width}px`
         textLayer.innerHTML = ''
 
+        // Store embeddings for the page text
+        const pageText = textContent.items.map(item => item.str).join(' ')
+        if (pageText.trim()) {
+          // Group items into paragraphs based on y-position
+          const paragraphs = []
+          let currentParagraph = ''
+          let lastY = null
+          
+          for (const item of textContent.items) {
+            if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
+              // New paragraph
+              if (currentParagraph.trim()) {
+                paragraphs.push(currentParagraph.trim())
+              }
+              currentParagraph = item.str
+            } else {
+              currentParagraph += ' ' + item.str
+            }
+            lastY = item.transform[5]
+          }
+          if (currentParagraph.trim()) {
+            paragraphs.push(currentParagraph.trim())
+          }
+          
+          // Store embeddings for each paragraph
+          for (const paragraph of paragraphs) {
+            await storePageEmbeddings(paragraph, pageNumber)
+          }
+        }
+
         // Create text layer
         const textDivs = []
         pdfjsLib.renderTextLayer({
@@ -129,7 +168,7 @@ export default function Home() {
         }, 100)
       }
     } catch (error) {
-      console.error('Error rendering page:', error)
+      // console.error('Error rendering page:', error)
     }
   }
 
@@ -219,7 +258,7 @@ export default function Home() {
         timestamp: new Date().toISOString(),
       }])
     } catch (error) {
-      console.error('Translation error:', error)
+      // console.error('Translation error:', error)
       setTranslatedText('Error translating text')
     } finally {
       setIsTranslating(false)
@@ -251,7 +290,7 @@ export default function Home() {
       const data = await response.json()
       setAnalysis(data.analysis)
     } catch (error) {
-      console.error('Analysis error:', error)
+      // console.error('Analysis error:', error)
       setAnalysis('Error analyzing text')
     } finally {
       setIsAnalyzing(false)
@@ -297,7 +336,7 @@ export default function Home() {
       const data = await response.json()
       setImageAnalysis(data.analysis)
     } catch (error) {
-      console.error('Screenshot analysis error:', error)
+      // console.error('Screenshot analysis error:', error)
       setImageAnalysis('Error analyzing screenshot')
     } finally {
       setIsAnalyzingImage(false)
@@ -552,167 +591,342 @@ export default function Home() {
     }
   }
 
+  // Add handler for similarity search
+  const handleSimilaritySearch = async () => {
+    if (!selectedText) return
+    
+    setIsSearchingSimilar(true)
+    try {
+      const response = await fetch('/api/similar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: selectedText,
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to search similar passages')
+
+      const { similar } = await response.json()
+      setSimilarPassages(similar)
+    } catch (error) {
+      // console.error('Similar search error:', error)
+    } finally {
+      setIsSearchingSimilar(false)
+      setShowMenu(false)
+    }
+  }
+
+  // Update storePageEmbeddings function
+  const storePageEmbeddings = async (text, pageNumber) => {
+    setIsStoringEmbeddings(true)
+    try {
+      const response = await fetch('/api/similar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          pageNumber,
+          pdfName: pdfFile?.name,
+          store: true
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.details || 'Failed to store embeddings')
+      }
+
+      const data = await response.json()
+      if (!data.success) {
+        throw new Error('Failed to store embeddings')
+      }
+    } catch (error) {
+      // console.error('Failed to store embeddings:', error)
+      // Optionally show error to user
+      // alert('Failed to create embeddings: ' + error.message)
+    } finally {
+      setIsStoringEmbeddings(false)
+    }
+  }
+
+  // Add handler for manual similarity search
+  const handleManualSearch = async () => {
+    if (!searchQuery.trim()) return
+    
+    setIsSearchingSimilar(true)
+    try {
+      const response = await fetch('/api/similar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: searchQuery,
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to search similar passages')
+
+      const { similar } = await response.json()
+      setSimilarPassages(similar)
+    } catch (error) {
+      // console.error('Similar search error:', error)
+    } finally {
+      setIsSearchingSimilar(false)
+    }
+  }
+
+  // Add chat handler
+  const handleChat = async () => {
+    if (!chatInput.trim()) return
+    
+    setIsChatLoading(true)
+    const userMessage = chatInput.trim()
+    setChatInput('')
+    
+    // Add user message to chat history
+    setChatHistory(prev => [...prev, { role: 'user', content: userMessage }])
+    
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: userMessage,
+          pdfName: pdfFile?.name
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to get chat response')
+
+      const { answer, context } = await response.json()
+      
+      // Add assistant message with context to chat history
+      setChatHistory(prev => [...prev, {
+        role: 'assistant',
+        content: answer,
+        context: context
+      }])
+    } catch (error) {
+      // console.error('Chat error:', error)
+      setChatHistory(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your question.'
+      }])
+    } finally {
+      setIsChatLoading(false)
+    }
+  }
+
   return (
-    <main className="min-h-screen flex">
-      {/* Main content area */}
-      <div className="flex-1 p-8 overflow-auto">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-2xl font-bold mb-4">PDF Reader with Translation</h1>
-          
-          {/* Controls */}
-          <div className="flex gap-4 mb-6">
+    <main className="flex min-h-screen">
+      <div className="flex-1 p-4">
+        {/* PDF Upload Section */}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
             <input
               type="file"
-              accept=".pdf"
+              accept="application/pdf"
               onChange={handleFileUpload}
-              ref={fileInputRef}
               className="hidden"
+              ref={fileInputRef}
             />
             <button
-              onClick={() => fileInputRef.current.click()}
+              onClick={() => fileInputRef.current?.click()}
               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
             >
               Upload PDF
             </button>
-            
-            <select
-              value={targetLanguage}
-              onChange={handleLanguageChange}
-              className="border rounded p-2"
-            >
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-            </select>
-
-            <div className="flex items-center gap-2">
+            {pdfFile && (
               <button
-                onClick={prevPage}
-                disabled={currentPage <= 1}
-                className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+                onClick={() => setIsChatOpen(true)}
+                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 flex items-center gap-2"
               >
-                Previous
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                Chat with PDF
               </button>
-              <span>
-                Page {currentPage} of {numPages}
-              </span>
-              <button
-                onClick={nextPage}
-                disabled={currentPage >= numPages}
-                className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
+            )}
+          </div>
 
-            <select
-              value={scale}
-              onChange={(e) => setScale(Number(e.target.value))}
-              className="border rounded p-2"
-            >
-              <option value={1}>100%</option>
-              <option value={1.5}>150%</option>
-              <option value={2}>200%</option>
-              <option value={2.5}>250%</option>
-            </select>
-
+          {/* Remove the floating chat button */}
+          {pdfFile && (
             <button
-              onClick={handleScreenshotAnalysis}
-              disabled={isAnalyzingImage}
-              className={`px-4 py-2 rounded transition-colors ${
-                isAnalyzingImage 
-                ? 'bg-purple-300 cursor-not-allowed' 
-                : 'bg-purple-500 hover:bg-purple-600'
-              } text-white`}
+              onClick={() => setIsChatOpen(true)}
+              className="fixed bottom-4 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
             >
-              {isAnalyzingImage ? 'Analyzing...' : 'Analyze Current View'}
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="flex gap-4 mb-6">
+          <select
+            value={targetLanguage}
+            onChange={handleLanguageChange}
+            className="border rounded p-2"
+          >
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+          </select>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={prevPage}
+              disabled={currentPage <= 1}
+              className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span>
+              Page {currentPage} of {numPages}
+            </span>
+            <button
+              onClick={nextPage}
+              disabled={currentPage >= numPages}
+              className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+            >
+              Next
             </button>
           </div>
 
-          {/* PDF Viewer */}
-          <div className="border rounded p-4 bg-gray-100 relative">
-            <div className="relative mx-auto" style={{ width: 'fit-content' }}>
-              <canvas ref={canvasRef} />
+          <select
+            value={scale}
+            onChange={(e) => setScale(Number(e.target.value))}
+            className="border rounded p-2"
+          >
+            <option value={1}>100%</option>
+            <option value={1.5}>150%</option>
+            <option value={2}>200%</option>
+            <option value={2.5}>250%</option>
+          </select>
+
+          <button
+            onClick={handleScreenshotAnalysis}
+            disabled={isAnalyzingImage}
+            className={`px-4 py-2 rounded transition-colors ${
+              isAnalyzingImage 
+              ? 'bg-purple-300 cursor-not-allowed' 
+              : 'bg-purple-500 hover:bg-purple-600'
+            } text-white`}
+          >
+            {isAnalyzingImage ? 'Analyzing...' : 'Analyze Current View'}
+          </button>
+        </div>
+
+        {/* PDF Viewer */}
+        <div className="border rounded p-4 bg-gray-100 relative">
+          <div className="relative mx-auto" style={{ width: 'fit-content' }}>
+            <canvas ref={canvasRef} />
+            <div
+              ref={textLayerRef}
+              className="absolute top-0 left-0 right-0 bottom-0 textLayer"
+              style={{
+                pointerEvents: 'none',
+              }}
+              onMouseUp={handleTextSelection}
+              onMouseMove={handleTextHover}
+              onMouseLeave={() => setShowFootnote(false)}
+            />
+            
+            {/* Loading Overlay */}
+            {isAnalyzingImage && (
+              <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg p-4 flex flex-col items-center">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mb-2"></div>
+                  <p className="text-sm text-gray-600">Analyzing current view...</p>
+                </div>
+              </div>
+            )}
+            
+            {/* Selection Menu */}
+            {showMenu && (
               <div
-                ref={textLayerRef}
-                className="absolute top-0 left-0 right-0 bottom-0 textLayer"
+                ref={menuRef}
+                className="absolute bg-white shadow-lg rounded-lg p-2 z-50 transform -translate-x-1/2"
                 style={{
-                  pointerEvents: 'none',
+                  left: menuPosition.x,
+                  top: menuPosition.y - 40,
                 }}
-                onMouseUp={handleTextSelection}
-                onMouseMove={handleTextHover}
-                onMouseLeave={() => setShowFootnote(false)}
-              />
-              
-              {/* Loading Overlay */}
-              {isAnalyzingImage && (
-                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                  <div className="bg-white rounded-lg p-4 flex flex-col items-center">
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mb-2"></div>
-                    <p className="text-sm text-gray-600">Analyzing current view...</p>
-                  </div>
+              >
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleTranslate}
+                    disabled={isTranslating}
+                    className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                      isTranslating
+                        ? 'bg-blue-300 cursor-not-allowed'
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    }`}
+                  >
+                    {isTranslating ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Translating...</span>
+                      </>
+                    ) : (
+                      'Translate'
+                    )}
+                  </button>
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={isAnalyzing}
+                    className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                      isAnalyzing
+                        ? 'bg-green-300 cursor-not-allowed'
+                        : 'bg-green-500 hover:bg-green-600 text-white'
+                    }`}
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Analyzing...</span>
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </button>
+                  <button
+                    onClick={handleFootnoteButton}
+                    className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                  >
+                    Footnote
+                  </button>
+                  <button
+                    onClick={handleSimilaritySearch}
+                    disabled={isSearchingSimilar}
+                    className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                      isSearchingSimilar
+                        ? 'bg-purple-300 cursor-not-allowed'
+                        : 'bg-purple-500 hover:bg-purple-600 text-white'
+                    }`}
+                  >
+                    {isSearchingSimilar ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Searching...</span>
+                      </>
+                    ) : (
+                      'Find Similar'
+                    )}
+                  </button>
                 </div>
-              )}
-              
-              {/* Selection Menu */}
-              {showMenu && (
-                <div
-                  ref={menuRef}
-                  className="absolute bg-white shadow-lg rounded-lg p-2 z-50 transform -translate-x-1/2"
-                  style={{
-                    left: menuPosition.x,
-                    top: menuPosition.y - 40,
-                  }}
-                >
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleTranslate}
-                      disabled={isTranslating}
-                      className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
-                        isTranslating
-                          ? 'bg-blue-300 cursor-not-allowed'
-                          : 'bg-blue-500 hover:bg-blue-600 text-white'
-                      }`}
-                    >
-                      {isTranslating ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          <span>Translating...</span>
-                        </>
-                      ) : (
-                        'Translate'
-                      )}
-                    </button>
-                    <button
-                      onClick={handleAnalyze}
-                      disabled={isAnalyzing}
-                      className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
-                        isAnalyzing
-                          ? 'bg-green-300 cursor-not-allowed'
-                          : 'bg-green-500 hover:bg-green-600 text-white'
-                      }`}
-                    >
-                      {isAnalyzing ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          <span>Analyzing...</span>
-                        </>
-                      ) : (
-                        'Analyze'
-                      )}
-                    </button>
-                    <button
-                      onClick={handleFootnoteButton}
-                      className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                    >
-                      Footnote
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -751,6 +965,26 @@ export default function Home() {
               }`}
             >
               Footnotes
+            </button>
+            <button
+              onClick={() => setActiveTab('similar')}
+              className={`px-4 py-2 ${
+                activeTab === 'similar'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500'
+              }`}
+            >
+              Search
+            </button>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`px-4 py-2 ${
+                activeTab === 'chat'
+                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  : 'text-gray-500'
+              }`}
+            >
+              Chat
             </button>
           </div>
 
@@ -886,6 +1120,141 @@ export default function Home() {
                 ))}
             </div>
           )}
+
+          {/* Add similar search tab content */}
+          {activeTab === 'similar' && (
+            <div className="p-4">
+              <div className="mb-6">
+                <h2 className="text-lg font-bold mb-2">Search Similar Passages</h2>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Enter text to search..."
+                    className="flex-1 border rounded p-2"
+                  />
+                  <button
+                    onClick={handleManualSearch}
+                    disabled={isSearchingSimilar || !searchQuery.trim()}
+                    className={`px-4 py-2 rounded flex items-center gap-2 ${
+                      isSearchingSimilar || !searchQuery.trim()
+                        ? 'bg-blue-300 cursor-not-allowed'
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    }`}
+                  >
+                    {isSearchingSimilar ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Searching...</span>
+                      </>
+                    ) : (
+                      'Search'
+                    )}
+                  </button>
+                </div>
+              </div>
+              
+              {similarPassages.length > 0 ? (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-gray-700">Similar Passages Found:</h3>
+                  {similarPassages.map((match, index) => (
+                    <div key={index} className="bg-gray-50 p-3 rounded border">
+                      <div className="text-xs text-gray-500 mb-1">
+                        Page {match.metadata.pageNumber} - {match.metadata.pdfName}
+                      </div>
+                      <p className="text-sm text-gray-600">{match.metadata.text}</p>
+                      <div className="text-xs text-gray-400 mt-1">
+                        Similarity: {(match.score * 100).toFixed(1)}%
+                      </div>
+                      <button
+                        onClick={() => setCurrentPage(match.metadata.pageNumber)}
+                        className="mt-2 text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                      >
+                        Go to Page
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-500 text-center">
+                  {searchQuery.trim() ? 'No similar passages found.' : 'Enter text to search for similar passages.'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Add chat tab content */}
+          {activeTab === 'chat' && (
+            <div className="p-4">
+              <div className="mb-4">
+                <h2 className="text-lg font-bold mb-2">Chat with PDF</h2>
+                <div className="space-y-4 mb-4 max-h-[500px] overflow-y-auto">
+                  {chatHistory.map((message, index) => (
+                    <div
+                      key={index}
+                      className={`flex flex-col ${
+                        message.role === 'user' ? 'items-end' : 'items-start'
+                      }`}
+                    >
+                      <div
+                        className={`rounded-lg p-3 max-w-[80%] ${
+                          message.role === 'user'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-100'
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      </div>
+                      {message.context && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          <p className="font-semibold">Based on these passages:</p>
+                          {message.context.map((ctx, i) => (
+                            <div key={i} className="mt-1 p-2 bg-gray-50 rounded">
+                              <p>{ctx.metadata.text}</p>
+                              <p className="mt-1 text-gray-400">
+                                Page {ctx.metadata.pageNumber} - 
+                                Similarity: {(ctx.score * 100).toFixed(1)}%
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleChat()}
+                    placeholder="Ask a question about the PDF..."
+                    className="flex-1 border rounded p-2"
+                    disabled={isChatLoading}
+                  />
+                  <button
+                    onClick={handleChat}
+                    disabled={isChatLoading || !chatInput.trim()}
+                    className={`px-4 py-2 rounded flex items-center gap-2 ${
+                      isChatLoading || !chatInput.trim()
+                        ? 'bg-blue-300 cursor-not-allowed'
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    }`}
+                  >
+                    {isChatLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Thinking...</span>
+                      </>
+                    ) : (
+                      'Send'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -897,6 +1266,32 @@ export default function Home() {
           onClose={() => setShowFootnote(false)}
         />
       )}
+
+      {/* Add loading indicator to the UI */}
+      {isStoringEmbeddings && (
+        <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          <span>Creating embeddings...</span>
+        </div>
+      )}
+
+      {/* Add chat button */}
+      {pdfFile && (
+        <button
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-4 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        </button>
+      )}
+
+      {/* Chat Modal */}
+      <ChatModal 
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+      />
     </main>
   )
 }
