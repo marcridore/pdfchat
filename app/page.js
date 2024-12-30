@@ -9,6 +9,8 @@ import ChatModal from './components/ChatModal'
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
 export default function Home() {
+  const [documents, setDocuments] = useState([])
+  const [currentDocument, setCurrentDocument] = useState(null)
   const [pdfFile, setPdfFile] = useState(null)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -142,7 +144,7 @@ export default function Home() {
             paragraphs.push(currentParagraph.trim())
           }
           
-          // Store embeddings for each paragraph
+          // Store embeddings for each paragraph with document context
           for (const paragraph of paragraphs) {
             await storePageEmbeddings(paragraph, pageNumber)
           }
@@ -176,19 +178,64 @@ export default function Home() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0]
     if (file && file.type === 'application/pdf') {
-      // Clear previous states
-      setPdfFile(null)
-      setNumPages(0)
-      setCurrentPage(1)
-      setScale(1.5)
-      setSelectedText('')
-      setShowMenu(false)
+      // Create new document object
+      const newDoc = {
+        id: Date.now(),
+        file: file,
+        name: file.name,
+        currentPage: 1,
+        scale: 1.5,
+        footnotesHistory: {},
+        footnoteCounter: 1
+      }
+
+      // Add to documents array
+      setDocuments(prev => [...prev, newDoc])
       
-      // Load new PDF
+      // Set as current document
+      setCurrentDocument(newDoc)
       setPdfFile(file)
+      
+      // Load the PDF
       loadPDF(file)
     }
   }
+
+  // Add handler for switching documents
+  const handleDocumentSwitch = (docId) => {
+    const doc = documents.find(d => d.id === docId)
+    if (doc) {
+      setCurrentDocument(doc)
+      setPdfFile(doc.file)
+      setCurrentPage(doc.currentPage)
+      setScale(doc.scale)
+      setFootnotesHistory(doc.footnotesHistory)
+      setFootnoteCounter(doc.footnoteCounter)
+      
+      // Load PDF and ensure embeddings are created for the current page
+      loadPDF(doc.file).then(() => {
+        renderPage(doc.currentPage)
+      })
+    }
+  }
+
+  // Update document state when relevant properties change
+  useEffect(() => {
+    if (currentDocument) {
+      setDocuments(prev => prev.map(doc => {
+        if (doc.id === currentDocument.id) {
+          return {
+            ...doc,
+            currentPage,
+            scale,
+            footnotesHistory,
+            footnoteCounter
+          }
+        }
+        return doc
+      }))
+    }
+  }, [currentPage, scale, footnotesHistory, footnoteCounter])
 
   // Handle text selection
   const handleTextSelection = () => {
@@ -631,7 +678,9 @@ export default function Home() {
         body: JSON.stringify({
           text,
           pageNumber,
-          pdfName: pdfFile?.name,
+          // Include current document info
+          pdfName: currentDocument?.name || pdfFile?.name,
+          documentId: currentDocument?.id,
           store: true
         }),
       })
@@ -647,8 +696,6 @@ export default function Home() {
       }
     } catch (error) {
       // console.error('Failed to store embeddings:', error)
-      // Optionally show error to user
-      // alert('Failed to create embeddings: ' + error.message)
     } finally {
       setIsStoringEmbeddings(false)
     }
@@ -728,7 +775,7 @@ export default function Home() {
   return (
     <main className="flex min-h-screen">
       <div className="flex-1 p-4">
-        {/* PDF Upload Section */}
+        {/* PDF Upload and Document Selection Section */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <input
@@ -744,6 +791,22 @@ export default function Home() {
             >
               Upload PDF
             </button>
+
+            {/* Add document selector dropdown */}
+            {documents.length > 0 && (
+              <select
+                value={currentDocument?.id || ''}
+                onChange={(e) => handleDocumentSwitch(Number(e.target.value))}
+                className="border rounded p-2"
+              >
+                {documents.map(doc => (
+                  <option key={doc.id} value={doc.id}>
+                    {doc.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {pdfFile && (
               <button
                 onClick={() => setIsChatOpen(true)}
@@ -756,18 +819,6 @@ export default function Home() {
               </button>
             )}
           </div>
-
-          {/* Remove the floating chat button */}
-          {pdfFile && (
-            <button
-              onClick={() => setIsChatOpen(true)}
-              className="fixed bottom-4 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-            </button>
-          )}
         </div>
 
         {/* Controls */}
