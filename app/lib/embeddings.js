@@ -162,12 +162,34 @@ export async function storeEmbedding(text, metadata) {
     throw new Error('Pinecone index not initialized')
   }
 
+  console.log('Checking existing embeddings with metadata:', metadata)
+
+  // Check if embeddings already exist for this document and page
+  const existingResults = await index.query({
+    vector: Array(768).fill(0), // Dummy vector for checking
+    topK: 1,
+    filter: {
+      $and: [
+        { documentId: { $eq: metadata.documentId } },
+        { pageNumber: { $eq: metadata.pageNumber } }
+      ]
+    }
+  })
+
+  // If embeddings already exist for this page, skip storing
+  if (existingResults.matches.length > 0) {
+    console.log('Embeddings already exist for document:', metadata.documentId, 'page:', metadata.pageNumber)
+    return
+  }
+
+  console.log('Creating new embeddings for document:', metadata.documentId, 'page:', metadata.pageNumber)
+
   // Split text into chunks
   const chunks = splitIntoChunks(text)
   
   // Validate we have chunks to store
   if (chunks.length === 0) {
-    return // Exit early instead of throwing error
+    return
   }
 
   const embeddings = []
@@ -288,4 +310,16 @@ export async function findSimilar(text, limit = 5) {
     .slice(0, limit)
 
   return sortedResults
+} 
+
+async function storePageEmbeddings(text, pageNumber, metadata) {
+  try {
+    await storeEmbedding(text, {
+      pageNumber,
+      documentId: metadata.documentId,
+      pdfName: metadata.pdfName
+    })
+  } catch (error) {
+    console.error('Error storing embeddings:', error)
+  }
 } 

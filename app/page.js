@@ -40,6 +40,7 @@ export default function Home() {
   const [chatInput, setChatInput] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
+  const [processedPagesMap, setProcessedPagesMap] = useState({})
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -48,8 +49,17 @@ export default function Home() {
   const menuRef = useRef(null)
 
   // Load PDF document
-  const loadPDF = async (file) => {
+  const loadPDF = async (file, doc = null) => {
+    // Use passed document or current document from state
+    const activeDoc = doc || currentDocument
+
     try {
+      console.log('Loading PDF:', {
+        fileName: file.name,
+        isNewDocument: activeDoc?.isNewDocument,
+        documentId: activeDoc?.id
+      })
+
       // Clean up previous PDF and canvas
       if (pdfDocRef.current) {
         pdfDocRef.current.destroy()
@@ -63,9 +73,9 @@ export default function Home() {
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
       setCurrentPage(1)
-      renderPage(1)
+      renderPage(1, activeDoc)
     } catch (error) {
-      // console.error('Error loading PDF:', error)
+      console.error('Error loading PDF:', error)
     }
   }
 
@@ -86,10 +96,23 @@ export default function Home() {
   }
 
   // Update renderPage function
-  const renderPage = async (pageNumber) => {
+  const renderPage = async (pageNumber, doc = null) => {
     if (!pdfDocRef.current) return
 
+    // Use passed document or current document from state
+    const activeDoc = doc || currentDocument
+
+    // Get processed pages for current document
+    const docProcessedPages = processedPagesMap[activeDoc?.id] || new Set()
+
     try {
+      console.log('Rendering page:', {
+        pageNumber,
+        documentId: activeDoc?.id,
+        isNewDocument: activeDoc?.isNewDocument,
+        processedPages: Array.from(docProcessedPages)
+      })
+
       // Ensure previous operations are cleaned up
       cleanupCanvas()
 
@@ -123,30 +146,59 @@ export default function Home() {
         // Store embeddings for the page text
         const pageText = textContent.items.map(item => item.str).join(' ')
         if (pageText.trim()) {
-          // Group items into paragraphs based on y-position
-          const paragraphs = []
-          let currentParagraph = ''
-          let lastY = null
-          
-          for (const item of textContent.items) {
-            if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
-              // New paragraph
-              if (currentParagraph.trim()) {
-                paragraphs.push(currentParagraph.trim())
+          console.log('Processing page text:', {
+            pageNumber,
+            textLength: pageText.length,
+            isNewDocument: activeDoc?.isNewDocument,
+            alreadyProcessed: docProcessedPages.has(pageNumber)
+          })
+
+          // Process page if it's a new document or hasn't been processed yet
+          if (activeDoc?.isNewDocument && !docProcessedPages.has(pageNumber)) {
+            console.log('Creating embeddings for page:', pageNumber)
+            // Group items into paragraphs based on y-position
+            const paragraphs = []
+            let currentParagraph = ''
+            let lastY = null
+            
+            for (const item of textContent.items) {
+              if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
+                if (currentParagraph.trim()) {
+                  paragraphs.push(currentParagraph.trim())
+                }
+                currentParagraph = item.str
+              } else {
+                currentParagraph += ' ' + item.str
               }
-              currentParagraph = item.str
-            } else {
-              currentParagraph += ' ' + item.str
+              lastY = item.transform[5]
             }
-            lastY = item.transform[5]
-          }
-          if (currentParagraph.trim()) {
-            paragraphs.push(currentParagraph.trim())
-          }
-          
-          // Store embeddings for each paragraph with document context
-          for (const paragraph of paragraphs) {
-            await storePageEmbeddings(paragraph, pageNumber)
+            if (currentParagraph.trim()) {
+              paragraphs.push(currentParagraph.trim())
+            }
+            
+            // Store embeddings for each paragraph
+            for (const paragraph of paragraphs) {
+              console.log('Storing embedding for paragraph:', {
+                pageNumber,
+                paragraphLength: paragraph.length
+              })
+              await storePageEmbeddings(paragraph, pageNumber, {
+                documentId: activeDoc.id,
+                pdfName: activeDoc.name
+              })
+            }
+
+            // Mark page as processed for this document
+            setProcessedPagesMap(prev => ({
+              ...prev,
+              [activeDoc.id]: new Set([...docProcessedPages, pageNumber])
+            }))
+            console.log('Page marked as processed:', pageNumber)
+          } else {
+            console.log('Skipping embeddings:', {
+              reason: !activeDoc?.isNewDocument ? 'Not a new document' : 'Page already processed',
+              pageNumber
+            })
           }
         }
 
@@ -170,7 +222,7 @@ export default function Home() {
         }, 100)
       }
     } catch (error) {
-      // console.error('Error rendering page:', error)
+      console.error('Error rendering page:', error)
     }
   }
 
@@ -178,6 +230,11 @@ export default function Home() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0]
     if (file && file.type === 'application/pdf') {
+      console.log('Uploading new document:', {
+        fileName: file.name,
+        timestamp: Date.now()
+      })
+
       // Create new document object
       const newDoc = {
         id: Date.now(),
@@ -186,36 +243,62 @@ export default function Home() {
         currentPage: 1,
         scale: 1.5,
         footnotesHistory: {},
-        footnoteCounter: 1
+        footnoteCounter: 1,
+        isNewDocument: true
       }
 
-      // Add to documents array
+      console.log('Created new document object:', {
+        id: newDoc.id,
+        name: newDoc.name,
+        isNewDocument: newDoc.isNewDocument
+      })
+
+      // Update state and load PDF after state is updated
       setDocuments(prev => [...prev, newDoc])
-      
-      // Set as current document
       setCurrentDocument(newDoc)
       setPdfFile(file)
+      // Reset processed pages for new document
+      setProcessedPagesMap(prev => ({
+        ...prev,
+        [newDoc.id]: new Set()
+      }))
       
-      // Load the PDF
-      loadPDF(file)
+      // Pass the document directly to loadPDF to avoid state timing issues
+      loadPDF(file, newDoc)
     }
   }
 
   // Add handler for switching documents
   const handleDocumentSwitch = (docId) => {
+    console.log('Switching document:', {
+      fromId: currentDocument?.id,
+      toId: docId
+    })
+
     const doc = documents.find(d => d.id === docId)
     if (doc) {
+      doc.isNewDocument = false
+      // Ensure document has an entry in processedPagesMap
+      if (!processedPagesMap[doc.id]) {
+        setProcessedPagesMap(prev => ({
+          ...prev,
+          [doc.id]: new Set()
+        }))
+      }
+      
+      console.log('Switched to document:', {
+        id: doc.id,
+        name: doc.name,
+        isNewDocument: doc.isNewDocument
+      })
+
       setCurrentDocument(doc)
       setPdfFile(doc.file)
       setCurrentPage(doc.currentPage)
       setScale(doc.scale)
       setFootnotesHistory(doc.footnotesHistory)
       setFootnoteCounter(doc.footnoteCounter)
-      
-      // Load PDF and ensure embeddings are created for the current page
-      loadPDF(doc.file).then(() => {
-        renderPage(doc.currentPage)
-      })
+      loadPDF(doc.file)
     }
   }
 
@@ -667,9 +750,15 @@ export default function Home() {
   }
 
   // Update storePageEmbeddings function
-  const storePageEmbeddings = async (text, pageNumber) => {
+  const storePageEmbeddings = async (text, pageNumber, metadata) => {
     setIsStoringEmbeddings(true)
     try {
+      console.log('Storing embeddings with metadata:', {
+        text: text.substring(0, 50) + '...',
+        pageNumber,
+        metadata
+      })
+
       const response = await fetch('/api/similar', {
         method: 'POST',
         headers: {
@@ -678,9 +767,11 @@ export default function Home() {
         body: JSON.stringify({
           text,
           pageNumber,
-          // Include current document info
-          pdfName: currentDocument?.name || pdfFile?.name,
-          documentId: currentDocument?.id,
+          metadata: {
+            documentId: metadata.documentId,
+            pdfName: metadata.pdfName,
+            pageNumber
+          },
           store: true
         }),
       })
@@ -695,7 +786,7 @@ export default function Home() {
         throw new Error('Failed to store embeddings')
       }
     } catch (error) {
-      // console.error('Failed to store embeddings:', error)
+      console.error('Failed to store embeddings:', error)
     } finally {
       setIsStoringEmbeddings(false)
     }

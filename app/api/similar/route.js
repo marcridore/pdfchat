@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 
 export async function POST(request) {
   try {
-    const { text, pageNumber, pdfName, store = false } = await request.json()
+    const { text, metadata, store = false } = await request.json()
 
     if (!text || text.trim().length === 0) {
       return Response.json({ error: 'Text is required' }, { status: 400 })
@@ -13,10 +13,8 @@ export async function POST(request) {
       try {
         // Store the embedding
         await storeEmbedding(text, {
-          id: nanoid(),
-          pageNumber,
-          pdfName,
-          timestamp: new Date().toISOString()
+          ...metadata,
+          id: `${metadata.documentId}-${metadata.pageNumber}-${nanoid(6)}`
         })
         return Response.json({ success: true })
       } catch (error) {
