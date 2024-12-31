@@ -4,6 +4,10 @@ import * as pdfjsLib from 'pdfjs-dist'
 import TranslationsCarousel from './components/TranslationsCarousel'
 import Tooltip from './components/Tooltip'
 import ChatModal from './components/ChatModal'
+import { 
+  storePageEmbeddings, 
+  storeDocumentEmbeddings 
+} from './lib/embeddings'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -43,6 +47,7 @@ export default function Home() {
   const [processedPagesMap, setProcessedPagesMap] = useState({})
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [summary, setSummary] = useState('')
+  const [isProcessingDocument, setIsProcessingDocument] = useState(false)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -52,11 +57,9 @@ export default function Home() {
 
   // Load PDF document
   const loadPDF = async (file, doc = null) => {
-    // Use passed document or current document from state
     const activeDoc = doc || currentDocument
 
     try {
-      // Check if we have a file
       if (!file) {
         console.log('No file available:', {
           docName: activeDoc?.name,
@@ -84,6 +87,15 @@ export default function Home() {
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
       setCurrentPage(1)
+
+      // Process all pages in background
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        await processPage(page, activeDoc)
+        console.log(`Processed page ${pageNum} in background`)
+      }
+
+      // Still render the first page for viewing
       renderPage(1, activeDoc)
     } catch (error) {
       console.error('Error loading PDF:', error)
@@ -108,77 +120,43 @@ export default function Home() {
 
   // Update renderPage function
   const renderPage = async (pageNumber, doc = null) => {
-    if (!pdfDocRef.current) return
-
-    const activeDoc = doc || currentDocument
-    const docProcessedPages = processedPagesMap[activeDoc?.id] || new Set()
+    if (!pdfDocRef.current) {
+      console.log('No PDF document loaded')
+      return
+    }
 
     try {
-      cleanupCanvas()
       const page = await pdfDocRef.current.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       
-      // Set canvas dimensions
-      canvasRef.current.height = viewport.height
-      canvasRef.current.width = viewport.width
-
-      // Create a new render task
-      const renderTask = page.render({
-        canvasContext: canvasRef.current.getContext('2d'),
-        viewport,
-      })
-
-      // Wait for render to complete
-      await renderTask.promise
-
-      // Get text content once
+      const canvas = canvasRef.current
+      const context = canvas.getContext('2d')
+      
+      canvas.height = viewport.height
+      canvas.width = viewport.width
+      
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      }
+      
+      await page.render(renderContext).promise
+      
+      // Update text layer
       const textContent = await page.getTextContent()
-      
-      console.log('Document status:', {
-        isNewDocument: activeDoc?.isNewDocument,
-        pageProcessed: docProcessedPages.has(pageNumber),
-        docId: activeDoc?.id,
-        pageNumber
-      })
-      
-      // Process page if it's a new document or hasn't been processed yet
-      if (activeDoc?.isNewDocument && !docProcessedPages.has(pageNumber)) {
-        console.log('Processing page:', pageNumber)
-        await processPage(page, activeDoc)
-        
-        // Mark page as processed
-        setProcessedPagesMap(prev => ({
-          ...prev,
-          [activeDoc.id]: new Set([...docProcessedPages, pageNumber])
-        }))
-      }
-
-      // Setup text layer display
       const textLayer = textLayerRef.current
-      if (textLayer) {
-        textLayer.style.height = `${viewport.height}px`
-        textLayer.style.width = `${viewport.width}px`
-        textLayer.innerHTML = ''
+      
+      textLayer.innerHTML = ''
+      textLayer.style.height = `${viewport.height}px`
+      textLayer.style.width = `${viewport.width}px`
+      
+      pdfjsLib.renderTextLayer({
+        textContent: textContent,
+        container: textLayer,
+        viewport: viewport,
+        textDivs: []
+      })
 
-        // Create text layer
-        const textDivs = []
-        pdfjsLib.renderTextLayer({
-          textContent,
-          container: textLayer,
-          viewport,
-          textDivs,
-          enhanceTextSelection: true,
-        })
-
-        // Add padding to text elements
-        setTimeout(() => {
-          const spans = textLayer.getElementsByTagName('span')
-          for (const span of spans) {
-            span.style.padding = '3px 0'
-            span.style.lineHeight = '1.25'
-          }
-        }, 100)
-      }
     } catch (error) {
       console.error('Error rendering page:', error)
     }
@@ -1594,6 +1572,14 @@ export default function Home() {
         onClose={() => setIsChatOpen(false)}
         pdfName={currentDocument?.name || ''}
       />
+
+      {/* Add loading indicator for document processing */}
+      {isProcessingDocument && (
+        <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          <span>Processing document...</span>
+        </div>
+      )}
     </main>
   )
 }

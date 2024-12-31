@@ -1,10 +1,22 @@
 // Import necessary modules
 import { Pinecone } from '@pinecone-database/pinecone'
 
-// Initialize Pinecone
-const pc = new Pinecone({
+// Check for required environment variables
+if (!process.env.PINECONE_API_KEY) {
+  throw new Error('PINECONE_API_KEY is not defined in environment variables')
+}
+
+// Initialize Pinecone with error handling
+let pc
+try {
+  pc = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY
-})
+  })
+  console.log('Pinecone client initialized successfully')
+} catch (error) {
+  console.error('Failed to initialize Pinecone client:', error)
+  throw error
+}
 
 // Constants
 const INDEX_NAME = 'pdf-embeddings'
@@ -382,6 +394,85 @@ export async function storePageEmbeddings(text, pageNumber, metadata) {
         return true
     } catch (error) {
         console.error('Error storing embeddings:', error)
+        throw error
+    }
+}
+
+// Add new function to store entire document
+export async function storeDocumentEmbeddings(pages, metadata) {
+    if (!index) {
+        throw new Error('Pinecone index not initialized')
+    }
+
+    // Check if document already exists
+    try {
+        const existingResults = await index.query({
+            vector: Array(768).fill(0),
+            topK: 1,
+            filter: {
+                documentId: { $eq: metadata.documentId }
+            },
+            includeMetadata: true
+        })
+
+        if (existingResults.matches && existingResults.matches.length > 0) {
+            console.log('Document already exists:', {
+                documentId: metadata.documentId,
+                existingId: existingResults.matches[0].id
+            })
+            return false
+        }
+
+        console.log('Processing new document:', {
+            documentId: metadata.documentId,
+            totalPages: pages.length
+        })
+
+        // Process all pages
+        const embeddings = []
+        let globalChunkIndex = 0
+
+        for (const page of pages) {
+            const chunks = splitIntoChunks(page.text)
+            
+            if (chunks.length === 0) continue
+
+            // Create embeddings for each chunk in the page
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i]
+                const embedding = await createEmbedding(chunk.text)
+
+                const id = `${metadata.documentId}-${page.pageNumber}-${i}-${Date.now()}`
+                
+                embeddings.push({
+                    id,
+                    values: embedding,
+                    metadata: {
+                        ...metadata,
+                        text: chunk.text,
+                        pageNumber: page.pageNumber,
+                        chunkIndex: globalChunkIndex,
+                        totalChunks: chunks.length,
+                        sentences: chunk.sentences,
+                        timestamp: Date.now()
+                    }
+                })
+
+                globalChunkIndex++
+            }
+        }
+
+        // Store all chunks at once
+        await index.upsert(embeddings)
+        console.log('Successfully stored document embeddings:', {
+            documentId: metadata.documentId,
+            totalEmbeddings: embeddings.length,
+            totalPages: pages.length
+        })
+
+        return true
+    } catch (error) {
+        console.error('Error storing document embeddings:', error)
         throw error
     }
 }
