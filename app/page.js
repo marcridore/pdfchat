@@ -41,6 +41,8 @@ export default function Home() {
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [processedPagesMap, setProcessedPagesMap] = useState({})
+  const [isSummarizing, setIsSummarizing] = useState(false)
+  const [summary, setSummary] = useState('')
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -302,6 +304,7 @@ export default function Home() {
     setTranslatedText('')
     setAnalysis('')
     setImageAnalysis('')
+    setSummary('')
   }
 
   // Handle translation
@@ -887,6 +890,36 @@ export default function Home() {
     }
   }
 
+  // Add summarize function
+  const handleSummarize = async () => {
+    if (!selectedText) return
+    
+    setIsSummarizing(true)
+    resetOutputs()
+    try {
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: selectedText,
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to get summary')
+
+      const data = await response.json()
+      setSummary(data.summary)
+    } catch (error) {
+      console.error('Summary error:', error)
+      setSummary('Error creating summary')
+    } finally {
+      setIsSummarizing(false)
+      setShowMenu(false)
+    }
+  }
+
   return (
     <main className="flex min-h-screen">
       <div className="flex-1 p-4">
@@ -1090,6 +1123,24 @@ export default function Home() {
                       'Find Similar'
                     )}
                   </button>
+                  <button
+                    onClick={handleSummarize}
+                    disabled={isSummarizing}
+                    className={`px-3 py-1 text-sm rounded flex items-center gap-2 ${
+                      isSummarizing
+                        ? 'bg-orange-300 cursor-not-allowed'
+                        : 'bg-orange-500 hover:bg-orange-600 text-white'
+                    }`}
+                  >
+                    {isSummarizing ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Summarizing...</span>
+                      </>
+                    ) : (
+                      'Summarize'
+                    )}
+                  </button>
                 </div>
               </div>
             )}
@@ -1228,6 +1279,24 @@ export default function Home() {
                     <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
                       <p className="whitespace-pre-line">{imageAnalysis}</p>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* Summary Results */}
+              {selectedText && (
+                <div>
+                  <h3 className="font-bold text-gray-700">Summary:</h3>
+                  {isSummarizing ? (
+                    <div className="p-2 bg-gray-50 rounded border mt-1">
+                      <p className="text-gray-600">Creating summary...</p>
+                    </div>
+                  ) : (
+                    summary && (
+                      <div className="p-2 bg-gray-50 rounded border mt-1 prose prose-sm">
+                        <p className="whitespace-pre-line">{summary}</p>
+                      </div>
+                    )
                   )}
                 </div>
               )}
