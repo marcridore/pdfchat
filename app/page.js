@@ -972,18 +972,13 @@ export default function Home() {
 
   // Update useEffect that loads from localStorage
   useEffect(() => {
-    const savedDocuments = localStorage.getItem('pdfDocuments')
-    if (savedDocuments) {
-      try {
-        const docs = JSON.parse(savedDocuments)
-        setDocuments(docs)
-        console.log('Loaded documents from storage:', {
-          count: docs.length,
-          names: docs.map(d => d.name)
-        })
-      } catch (error) {
-        console.error('Error loading documents:', error)
-      }
+    try {
+      // Clear documents from localStorage on page load/refresh
+      localStorage.removeItem('pdfDocuments')
+      setDocuments([]) // Clear documents state
+      console.log('Cleared documents list on page refresh')
+    } catch (error) {
+      console.error('Error clearing documents:', error)
     }
   }, [])
 
