@@ -56,6 +56,15 @@ export default function Home() {
     const activeDoc = doc || currentDocument
 
     try {
+      // Check if we have a file
+      if (!file) {
+        console.log('No file available:', {
+          docName: activeDoc?.name,
+          docId: activeDoc?.id
+        })
+        return
+      }
+
       console.log('Loading PDF:', {
         fileName: file.name,
         isNewDocument: activeDoc?.isNewDocument,
@@ -68,7 +77,7 @@ export default function Home() {
         pdfDocRef.current = null
       }
       cleanupCanvas()
-      resetOutputs() // Reset any previous outputs
+      resetOutputs()
 
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
@@ -187,14 +196,27 @@ export default function Home() {
       // Create new document object
       const newDoc = {
         id: Date.now(),
-        file: file,
         name: file.name,
         currentPage: 1,
         scale: 1.5,
         footnotesHistory: {},
         footnoteCounter: 1,
-        isNewDocument: true
+        isNewDocument: true,
+        file: file // Store the file in the document object
       }
+
+      // Update state and localStorage
+      const updatedDocuments = [...documents, newDoc]
+      setDocuments(updatedDocuments)
+      
+      // Store document metadata in localStorage (without the file)
+      const docForStorage = { ...newDoc }
+      delete docForStorage.file // Remove file before storing
+      localStorage.setItem('pdfDocuments', JSON.stringify(updatedDocuments.map(d => {
+        const docCopy = { ...d }
+        delete docCopy.file
+        return docCopy
+      })))
 
       // Reset processed pages for new document
       const newProcessedPages = new Set()
@@ -210,8 +232,6 @@ export default function Home() {
         processedPages: Array.from(newProcessedPages)
       })
 
-      // Update state and load PDF
-      setDocuments(prev => [...prev, newDoc])
       setCurrentDocument(newDoc)
       setPdfFile(file)
       
@@ -241,34 +261,50 @@ export default function Home() {
       console.log('Switched to document:', {
         id: doc.id,
         name: doc.name,
-        isNewDocument: doc.isNewDocument
+        isNewDocument: doc.isNewDocument,
+        hasFile: !!doc.file
       })
 
       setCurrentDocument(doc)
-      setPdfFile(doc.file)
+      if (doc.file) {
+        setPdfFile(doc.file)
+        loadPDF(doc.file, doc)
+      } else {
+        setPdfFile(null)
+        cleanupCanvas()
+        console.log('No file available for document:', doc.name)
+      }
       setCurrentPage(doc.currentPage)
       setScale(doc.scale)
       setFootnotesHistory(doc.footnotesHistory)
       setFootnoteCounter(doc.footnoteCounter)
-      loadPDF(doc.file)
     }
   }
 
   // Update document state when relevant properties change
   useEffect(() => {
     if (currentDocument) {
-      setDocuments(prev => prev.map(doc => {
+      const updatedDocuments = documents.map(doc => {
         if (doc.id === currentDocument.id) {
           return {
             ...doc,
             currentPage,
             scale,
             footnotesHistory,
-            footnoteCounter
+            footnoteCounter,
+            file: doc.file // Preserve the file
           }
         }
         return doc
-      }))
+      })
+      setDocuments(updatedDocuments)
+      
+      // Store document metadata in localStorage (without the file)
+      localStorage.setItem('pdfDocuments', JSON.stringify(updatedDocuments.map(d => {
+        const docCopy = { ...d }
+        delete docCopy.file
+        return docCopy
+      })))
     }
   }, [currentPage, scale, footnotesHistory, footnoteCounter])
 
@@ -920,6 +956,23 @@ export default function Home() {
     }
   }
 
+  // Update useEffect that loads from localStorage
+  useEffect(() => {
+    const savedDocuments = localStorage.getItem('pdfDocuments')
+    if (savedDocuments) {
+      try {
+        const docs = JSON.parse(savedDocuments)
+        setDocuments(docs)
+        console.log('Loaded documents from storage:', {
+          count: docs.length,
+          names: docs.map(d => d.name)
+        })
+      } catch (error) {
+        console.error('Error loading documents:', error)
+      }
+    }
+  }, [])
+
   return (
     <main className="flex min-h-screen">
       <div className="flex-1 p-4">
@@ -955,16 +1008,22 @@ export default function Home() {
               </select>
             )}
 
-            {pdfFile && (
-              <button
-                onClick={() => setIsChatOpen(true)}
-                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-                Chat with PDF
-              </button>
+            {/* Show chat button always */}
+            <button
+              onClick={() => setIsChatOpen(true)}
+              className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              Chat with PDF
+            </button>
+
+            {/* Add this near your document selector dropdown */}
+            {documents.length > 0 && !pdfFile && (
+              <div className="text-sm text-gray-600">
+                Please re-upload the PDF to view its contents
+              </div>
             )}
           </div>
         </div>
@@ -1511,16 +1570,14 @@ export default function Home() {
       )}
 
       {/* Add chat button */}
-      {pdfFile && (
-        <button
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-4 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-        </button>
-      )}
+      <button
+        onClick={() => setIsChatOpen(true)}
+        className="fixed bottom-4 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        </svg>
+      </button>
 
       {/* Chat Modal */}
       <ChatModal 
