@@ -869,60 +869,74 @@ export default function Home() {
 
   // Update processPage function
   async function processPage(page, doc) {
-    const content = await page.getTextContent()
-    
-    // Sort items by vertical position
-    const sortedItems = content.items.sort((a, b) => {
-      const yDiff = b.transform[5] - a.transform[5]
-      return Math.abs(yDiff) < 5 ? a.transform[4] - b.transform[4] : yDiff
-    })
-    
-    // Group items into paragraphs
-    const paragraphs = []
-    let currentParagraph = []
-    let lastY = null
-    let lastX = null
-    
-    for (const item of sortedItems) {
-      const { str, transform } = item
-      const [, , , , x, y] = transform
+    try {
+      const content = await page.getTextContent()
       
-      const isNewParagraph = lastY !== null && 
-        (Math.abs(y - lastY) > 15 || 
-         (Math.abs(y - lastY) > 5 && x < lastX))
+      // Sort items by vertical position
+      const sortedItems = content.items.sort((a, b) => {
+        const yDiff = b.transform[5] - a.transform[5]
+        return Math.abs(yDiff) < 5 ? a.transform[4] - b.transform[4] : yDiff
+      })
       
-      if (isNewParagraph && currentParagraph.length > 0) {
-        paragraphs.push(currentParagraph.join(' '))
-        currentParagraph = []
+      // Group items into paragraphs
+      const paragraphs = []
+      let currentParagraph = []
+      let lastY = null
+      let lastX = null
+      
+      for (const item of sortedItems) {
+        const { str, transform } = item
+        const [, , , , x, y] = transform
+        
+        const isNewParagraph = lastY !== null && 
+          (Math.abs(y - lastY) > 15 || 
+           (Math.abs(y - lastY) > 5 && x < lastX))
+        
+        if (isNewParagraph && currentParagraph.length > 0) {
+          paragraphs.push(currentParagraph.join(' '))
+          currentParagraph = []
+        }
+        
+        currentParagraph.push(str)
+        lastY = y
+        lastX = x
       }
       
-      currentParagraph.push(str)
-      lastY = y
-      lastX = x
-    }
-    
-    if (currentParagraph.length > 0) {
-      paragraphs.push(currentParagraph.join(' '))
-    }
-    
-    const pageText = paragraphs
-      .filter(p => p.trim().length > 0)
-      .join('\n\n')
-      .trim()
-    
-    if (pageText.length >= 10) {
-      await storePageEmbeddings(pageText, page.pageNumber, {
-        documentId: doc.id,
-        pdfName: doc.name,
-        isLastChunk: true
-      })
-    }
-    else {
-      console.log('Skipping page - insufficient text:', {
-        pageNumber: page.pageNumber,
-        textLength: pageText.length,
-        text: pageText
-      })
+      if (currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph.join(' '))
+      }
+      
+      const pageText = paragraphs
+        .filter(p => p.trim().length > 0)
+        .join('\n\n')
+        .trim()
+      
+      if (pageText.length > 0) {
+        const wasStored = await storePageEmbeddings(pageText, page.pageNumber, {
+          documentId: doc.id,
+          pdfName: doc.name,
+          isLastChunk: true
+        })
+
+        if (wasStored) {
+          console.log('Successfully processed page:', {
+            documentId: doc.id,
+            pageNumber: page.pageNumber
+          })
+        } else {
+          console.log('Page already exists in database:', {
+            documentId: doc.id,
+            pageNumber: page.pageNumber
+          })
+        }
+      } else {
+        console.log('Skipping page - insufficient text:', {
+          pageNumber: page.pageNumber,
+          textLength: pageText.length
+        })
+      }
+    } catch (error) {
+      console.error('Error processing page:', error)
     }
   }
 

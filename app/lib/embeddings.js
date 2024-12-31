@@ -10,10 +10,10 @@ const pc = new Pinecone({
 const INDEX_NAME = 'pdf-embeddings'
 const DIMENSION = 768 // dimension for m2-bert-80M-32k-retrieval model
 const ESTIMATED_MAX_CHARS_PER_PAGE = 4000
-const MIN_CHUNK_SIZE = 10   // Lower minimum chunk size for small documents
+const MIN_CHUNK_SIZE = 1   // Process even single-character chunks
 
-// Function to create index if it doesn't exist
-async function getOrCreateIndex() {
+// Export getOrCreateIndex function
+export async function getOrCreateIndex() {
     try {
       // Try to get the index
       return pc.index(INDEX_NAME)
@@ -185,58 +185,77 @@ export async function storeEmbedding(text, metadata) {
         throw new Error('Pinecone index not initialized')
     }
 
-    // Check if embeddings already exist for this document and page
-    const existingResults = await index.query({
-        vector: Array(768).fill(0), // Dummy vector for checking
-        topK: 1,
-        filter: {
-            $and: [
-                { documentId: { $eq: metadata.documentId } },
-                { pageNumber: { $eq: metadata.pageNumber } }
-            ]
+    // Improved check for existing embeddings
+    try {
+        const existingResults = await index.query({
+            vector: Array(768).fill(0),
+            topK: 1,
+            filter: {
+                $and: [
+                    { documentId: { $eq: metadata.documentId } },
+                    { pageNumber: { $eq: metadata.pageNumber } }
+                ]
+            },
+            includeMetadata: true
+        })
+
+        if (existingResults.matches && existingResults.matches.length > 0) {
+            console.log('Skipping: Embeddings exist for document:', {
+                documentId: metadata.documentId,
+                pageNumber: metadata.pageNumber,
+                existingId: existingResults.matches[0].id
+            })
+            return false // Return false to indicate no new embeddings were created
         }
-    })
 
-    // If embeddings already exist for this page, skip storing
-    if (existingResults.matches.length > 0) {
-        console.log('Embeddings already exist for document:', metadata.documentId, 'page:', metadata.pageNumber)
-        return
+        console.log('No existing embeddings found, proceeding with creation for:', {
+            documentId: metadata.documentId,
+            pageNumber: metadata.pageNumber
+        })
+    } catch (error) {
+        console.error('Error checking existing embeddings:', error)
+        throw error
     }
-
-    console.log('Creating new embeddings for document:', metadata.documentId, 'page:', metadata.pageNumber)
 
     // Split text into chunks
     const chunks = splitIntoChunks(text)
     
     // Validate we have chunks to store
     if (chunks.length === 0) {
-      return
+        return
     }
     
     const embeddings = []
-  
-        // Create embeddings for each chunk
+
+    // Create embeddings for each chunk
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i]
         const embedding = await createEmbedding(chunk.text)
 
-        const id = `${metadata.id}-${i}`
+        // Create a unique ID that includes all relevant metadata
+        const id = `${metadata.documentId}-${metadata.pageNumber}-${i}-${Date.now()}`
     
         embeddings.push({
             id,
             values: embedding,
             metadata: {
-              ...metadata,
-              text: chunk.text,
-              chunkIndex: i,
-              totalChunks: chunks.length,
-              sentences: chunk.sentences
+                ...metadata,
+                text: chunk.text,
+                chunkIndex: i,
+                totalChunks: chunks.length,
+                sentences: chunk.sentences,
+                timestamp: Date.now() // Add timestamp for versioning
             }
         })
     }
 
-  // Store all chunks
-  await index.upsert(embeddings)
+    // Store all chunks
+    await index.upsert(embeddings)
+    console.log('Successfully stored embeddings:', {
+        count: embeddings.length,
+        documentId: metadata.documentId,
+        pageNumber: metadata.pageNumber
+    })
 }
 
 
@@ -340,15 +359,29 @@ export async function findSimilar(text, limit = 5) {
 export async function storePageEmbeddings(text, pageNumber, metadata) {
     try {
         console.log('\n=== Processing Complete Page ===')
-        console.log('Page text length:', text.length)
-        console.log('First 200 chars:', text.substring(0, 200))
+        console.log('Checking embeddings for:', {
+            documentId: metadata.documentId,
+            pageNumber: pageNumber,
+            textLength: text.length
+        })
         
-        await storeEmbedding(text, {
+        const stored = await storeEmbedding(text, {
             pageNumber,
             documentId: metadata.documentId,
             pdfName: metadata.pdfName
         })
+
+        if (stored === false) {
+            console.log('Page already processed:', {
+                documentId: metadata.documentId,
+                pageNumber: pageNumber
+            })
+            return false
+        }
+
+        return true
     } catch (error) {
         console.error('Error storing embeddings:', error)
+        throw error
     }
 }
