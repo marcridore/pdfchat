@@ -99,108 +99,55 @@ export default function Home() {
   const renderPage = async (pageNumber, doc = null) => {
     if (!pdfDocRef.current) return
 
-    // Use passed document or current document from state
     const activeDoc = doc || currentDocument
-
-    // Get processed pages for current document
     const docProcessedPages = processedPagesMap[activeDoc?.id] || new Set()
 
     try {
-      console.log('Rendering page:', {
-        pageNumber,
-        documentId: activeDoc?.id,
-        isNewDocument: activeDoc?.isNewDocument,
-        processedPages: Array.from(docProcessedPages)
-      })
-
-      // Ensure previous operations are cleaned up
       cleanupCanvas()
-
       const page = await pdfDocRef.current.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       
-      const canvas = canvasRef.current
-      const context = canvas.getContext('2d')
-      
       // Set canvas dimensions
-      canvas.height = viewport.height
-      canvas.width = viewport.width
+      canvasRef.current.height = viewport.height
+      canvasRef.current.width = viewport.width
 
       // Create a new render task
       const renderTask = page.render({
-        canvasContext: context,
+        canvasContext: canvasRef.current.getContext('2d'),
         viewport,
       })
 
       // Wait for render to complete
       await renderTask.promise
 
-      // Setup text layer
+      // Get text content once
       const textContent = await page.getTextContent()
+      
+      console.log('Document status:', {
+        isNewDocument: activeDoc?.isNewDocument,
+        pageProcessed: docProcessedPages.has(pageNumber),
+        docId: activeDoc?.id,
+        pageNumber
+      })
+      
+      // Process page if it's a new document or hasn't been processed yet
+      if (activeDoc?.isNewDocument && !docProcessedPages.has(pageNumber)) {
+        console.log('Processing page:', pageNumber)
+        await processPage(page, activeDoc)
+        
+        // Mark page as processed
+        setProcessedPagesMap(prev => ({
+          ...prev,
+          [activeDoc.id]: new Set([...docProcessedPages, pageNumber])
+        }))
+      }
+
+      // Setup text layer display
       const textLayer = textLayerRef.current
       if (textLayer) {
         textLayer.style.height = `${viewport.height}px`
         textLayer.style.width = `${viewport.width}px`
         textLayer.innerHTML = ''
-
-        // Store embeddings for the page text
-        const pageText = textContent.items.map(item => item.str).join(' ')
-        if (pageText.trim()) {
-          console.log('Processing page text:', {
-            pageNumber,
-            textLength: pageText.length,
-            isNewDocument: activeDoc?.isNewDocument,
-            alreadyProcessed: docProcessedPages.has(pageNumber)
-          })
-
-          // Process page if it's a new document or hasn't been processed yet
-          if (activeDoc?.isNewDocument && !docProcessedPages.has(pageNumber)) {
-            console.log('Creating embeddings for page:', pageNumber)
-            // Group items into paragraphs based on y-position
-            const paragraphs = []
-            let currentParagraph = ''
-            let lastY = null
-            
-            for (const item of textContent.items) {
-              if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
-                if (currentParagraph.trim()) {
-                  paragraphs.push(currentParagraph.trim())
-                }
-                currentParagraph = item.str
-              } else {
-                currentParagraph += ' ' + item.str
-              }
-              lastY = item.transform[5]
-            }
-            if (currentParagraph.trim()) {
-              paragraphs.push(currentParagraph.trim())
-            }
-            
-            // Store embeddings for each paragraph
-            for (const paragraph of paragraphs) {
-              console.log('Storing embedding for paragraph:', {
-                pageNumber,
-                paragraphLength: paragraph.length
-              })
-              await storePageEmbeddings(paragraph, pageNumber, {
-                documentId: activeDoc.id,
-                pdfName: activeDoc.name
-              })
-            }
-
-            // Mark page as processed for this document
-            setProcessedPagesMap(prev => ({
-              ...prev,
-              [activeDoc.id]: new Set([...docProcessedPages, pageNumber])
-            }))
-            console.log('Page marked as processed:', pageNumber)
-          } else {
-            console.log('Skipping embeddings:', {
-              reason: !activeDoc?.isNewDocument ? 'Not a new document' : 'Page already processed',
-              pageNumber
-            })
-          }
-        }
 
         // Create text layer
         const textDivs = []
@@ -247,23 +194,26 @@ export default function Home() {
         isNewDocument: true
       }
 
+      // Reset processed pages for new document
+      const newProcessedPages = new Set()
+      setProcessedPagesMap(prev => ({
+        ...prev,
+        [newDoc.id]: newProcessedPages
+      }))
+
       console.log('Created new document object:', {
         id: newDoc.id,
         name: newDoc.name,
-        isNewDocument: newDoc.isNewDocument
+        isNewDocument: newDoc.isNewDocument,
+        processedPages: Array.from(newProcessedPages)
       })
 
-      // Update state and load PDF after state is updated
+      // Update state and load PDF
       setDocuments(prev => [...prev, newDoc])
       setCurrentDocument(newDoc)
       setPdfFile(file)
-      // Reset processed pages for new document
-      setProcessedPagesMap(prev => ({
-        ...prev,
-        [newDoc.id]: new Set()
-      }))
       
-      // Pass the document directly to loadPDF to avoid state timing issues
+      // Pass the document directly to loadPDF
       loadPDF(file, newDoc)
     }
   }
@@ -751,6 +701,12 @@ export default function Home() {
 
   // Update storePageEmbeddings function
   const storePageEmbeddings = async (text, pageNumber, metadata) => {
+    console.log('Starting embedding process:', {
+      pageNumber,
+      documentId: metadata.documentId,
+      textLength: text.length
+    })
+    
     setIsStoringEmbeddings(true)
     try {
       console.log('Storing embeddings with metadata:', {
@@ -776,15 +732,24 @@ export default function Home() {
         }),
       })
 
+      console.log('Embedding API response:', {
+        status: response.status,
+        ok: response.ok
+      })
+
       if (!response.ok) {
         const error = await response.json()
+        console.error('Embedding API error:', error)
         throw new Error(error.details || 'Failed to store embeddings')
       }
 
       const data = await response.json()
       if (!data.success) {
+        console.error('Embedding storage failed:', data)
         throw new Error('Failed to store embeddings')
       }
+      
+      console.log('Successfully stored embeddings for page:', pageNumber)
     } catch (error) {
       console.error('Failed to store embeddings:', error)
     } finally {
@@ -860,6 +825,65 @@ export default function Home() {
       }])
     } finally {
       setIsChatLoading(false)
+    }
+  }
+
+  // Update processPage function
+  async function processPage(page, doc) {
+    const content = await page.getTextContent()
+    
+    // Sort items by vertical position
+    const sortedItems = content.items.sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5]
+      return Math.abs(yDiff) < 5 ? a.transform[4] - b.transform[4] : yDiff
+    })
+    
+    // Group items into paragraphs
+    const paragraphs = []
+    let currentParagraph = []
+    let lastY = null
+    let lastX = null
+    
+    for (const item of sortedItems) {
+      const { str, transform } = item
+      const [, , , , x, y] = transform
+      
+      const isNewParagraph = lastY !== null && 
+        (Math.abs(y - lastY) > 15 || 
+         (Math.abs(y - lastY) > 5 && x < lastX))
+      
+      if (isNewParagraph && currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph.join(' '))
+        currentParagraph = []
+      }
+      
+      currentParagraph.push(str)
+      lastY = y
+      lastX = x
+    }
+    
+    if (currentParagraph.length > 0) {
+      paragraphs.push(currentParagraph.join(' '))
+    }
+    
+    const pageText = paragraphs
+      .filter(p => p.trim().length > 0)
+      .join('\n\n')
+      .trim()
+    
+    if (pageText.length >= 10) {
+      await storePageEmbeddings(pageText, page.pageNumber, {
+        documentId: doc.id,
+        pdfName: doc.name,
+        isLastChunk: true
+      })
+    }
+    else {
+      console.log('Skipping page - insufficient text:', {
+        pageNumber: page.pageNumber,
+        textLength: pageText.length,
+        text: pageText
+      })
     }
   }
 
@@ -1433,6 +1457,7 @@ export default function Home() {
       <ChatModal 
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
+        pdfName={currentDocument?.name || ''}
       />
     </main>
   )
