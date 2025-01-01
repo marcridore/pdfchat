@@ -237,103 +237,104 @@ export async function storeEmbedding(text, metadata) {
 
 // --- Function for Finding Similar Text ---
 export async function findSimilar(text, limit = 5) {
-    if (!index) {
-      throw new Error('Pinecone index not initialized')
-    }
-    
-    // Create embedding for search query
-    const queryEmbedding = await createEmbedding(text)
-    
-    // Get ALL available results when dataset is small
-    const results = await index.query({
-      vector: queryEmbedding,
-      topK: 10, // Get all records when we have a small dataset
-      includeMetadata: true
-    })
+  if (!index) {
+    throw new Error('Pinecone index not initialized')
+  }
+  
+  console.log('Starting similarity search:', {
+    query: text,
+    limit
+  })
 
-    if (!results.matches || results.matches.length === 0) {
-      return []
-    }
+  // Create embedding for search query
+  const queryEmbedding = await createEmbedding(text)
+  
+  // Query Pinecone
+  const results = await index.query({
+    vector: queryEmbedding,
+    topK: 30,
+    includeMetadata: true
+  })
 
-    // Post-process results with much stricter filtering for small datasets
-    const processedResults = results.matches
-      .map(match => {
-        const matchText = match.metadata.text.toLowerCase()
-        const searchText = text.toLowerCase()
+  console.log('Raw Pinecone results:', {
+    matchCount: results.matches?.length || 0,
+    firstMatch: results.matches?.[0] ? {
+      score: results.matches[0].score,
+      text: results.matches[0].metadata.text.substring(0, 50) + '...'
+    } : null
+  })
+
+  if (!results.matches || results.matches.length === 0) {
+    console.log('No matches found in vector search')
+    return []
+  }
+
+  // Post-process results with fuzzy matching
+  const processedResults = results.matches
+    .map(match => {
+      const matchText = match.metadata.text.toLowerCase()
+      const searchText = text.toLowerCase()
+      
+      // Calculate text matching score
+      let textMatchScore = 0
+      
+      // Check for exact phrase matches first
+      if (matchText.includes(searchText)) {
+        textMatchScore = 1.0
+      } else {
+        // Check for individual terms with fuzzy matching
+        const searchTerms = searchText.split(' ')
+          .filter(term => term.length > 2)
         
-        // Calculate text matching score
-        let textMatchScore = 0
-        let exactPhraseMatch = false
-        
-        // First check for exact phrase match
-        if (matchText.includes(searchText)) {
-          textMatchScore = 1.0
-          exactPhraseMatch = true
-        } else {
-          // Check for individual terms
-          const searchTerms = searchText.split(' ')
-            .filter(term => term.length > 2)
-            .sort((a, b) => b.length - a.length)
-          
-          const matchedTerms = searchTerms.map(term => {
-            const termIndex = matchText.indexOf(term)
-            if (termIndex === -1) return null
-            
-            // Check if it's a whole word match
-            const beforeChar = termIndex > 0 ? matchText[termIndex - 1] : ' '
-            const afterChar = termIndex + term.length < matchText.length ? 
-              matchText[termIndex + term.length] : ' '
-            
-            if (/\W/.test(beforeChar) && /\W/.test(afterChar)) {
-              return { term, index: termIndex }
-            }
-            return null
-          }).filter(Boolean)
-          
-          if (matchedTerms.length > 0) {
-            // Calculate proximity score
-            const positions = matchedTerms.map(m => m.index)
-            const maxDistance = Math.max(...positions) - Math.min(...positions)
-            const proximityScore = maxDistance < 50 ? 1.0 : 
-                                 maxDistance < 100 ? 0.8 : 0.5
-            
-            textMatchScore = (matchedTerms.length / searchTerms.length) * proximityScore
+        const matchedTerms = searchTerms.filter(term => {
+          // Check for exact term match
+          if (matchText.includes(term.toLowerCase())) {
+            return true
           }
-        }
-
-        // For small datasets, heavily prioritize exact matches
-        const combinedScore = exactPhraseMatch ? 
-          1.0 : // Perfect score for exact matches
-          (match.score * 0.1) + (textMatchScore * 0.9) // Almost completely ignore semantic similarity
-
-        return {
-          ...match,
-          score: combinedScore,
-          textMatchScore,
-          exactPhraseMatch
-        }
-      })
-      .filter(match => {
-        // For small datasets, only return exact matches or very strong term matches
-        if (match.exactPhraseMatch) return true
-        
-        // If no exact matches, require at least one search term to be present as a whole word
-        const searchTerms = text.toLowerCase().split(' ').filter(term => term.length > 2)
-        return searchTerms.some(term => {
-          const termIndex = match.metadata.text.toLowerCase().indexOf(term)
-          if (termIndex === -1) return false
           
-          const beforeChar = termIndex > 0 ? match.metadata.text[termIndex - 1] : ' '
-          const afterChar = termIndex + term.length < match.metadata.text.length ? 
-            match.metadata.text[termIndex + term.length] : ' '
-          
-          return /\W/.test(beforeChar) && /\W/.test(afterChar)
+          // Check for similar terms (basic fuzzy matching)
+          const termLength = term.length
+          return matchText.split(' ').some(word => {
+            if (Math.abs(word.length - termLength) > 2) return false
+            let differences = 0
+            for (let i = 0; i < Math.min(word.length, termLength); i++) {
+              if (word[i] !== term[i]) differences++
+            }
+            return differences <= 1 // Allow 1 character difference
+          })
         })
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
+        
+        if (matchedTerms.length > 0) {
+          textMatchScore = matchedTerms.length / searchTerms.length
+        }
+      }
 
-    return processedResults
+      // Combine vector similarity with text matching
+      const combinedScore = (match.score * 0.4) + (textMatchScore * 0.6)
+
+      return {
+        ...match,
+        score: combinedScore,
+        metadata: {
+          ...match.metadata,
+          matchedTerms: textMatchScore
+        }
+      }
+    })
+    .filter(match => match.score > 0.05) // Lower threshold to catch more results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+
+  console.log('Processed search results:', {
+    query: text.substring(0, 50) + '...',
+    resultCount: processedResults.length,
+    topScores: processedResults.map(r => ({
+      score: r.score,
+      text: r.metadata.text.substring(0, 50) + '...'
+    }))
+  })
+
+  return processedResults
 }
   
 

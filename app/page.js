@@ -794,7 +794,6 @@ export default function Home() {
     const userMessage = chatInput.trim()
     setChatInput('')
     
-    // Add user message to chat history
     setChatHistory(prev => [...prev, { role: 'user', content: userMessage }])
     
     try {
@@ -804,8 +803,7 @@ export default function Home() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          question: userMessage,
-          pdfName: pdfFile?.name
+          question: userMessage
         }),
       })
 
@@ -820,7 +818,7 @@ export default function Home() {
         context: context
       }])
     } catch (error) {
-      // console.error('Chat error:', error)
+      console.error('Chat error:', error)
       setChatHistory(prev => [...prev, {
         role: 'assistant',
         content: 'Sorry, I encountered an error processing your question.'
@@ -1576,6 +1574,11 @@ export default function Home() {
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
         pdfName={currentDocument?.name || ''}
+        chatHistory={chatHistory}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        handleChat={handleChat}
+        isChatLoading={isChatLoading}
       />
 
       {/* Add loading indicator for document processing */}

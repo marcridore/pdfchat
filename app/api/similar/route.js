@@ -44,6 +44,29 @@ export async function POST(req) {
       )
     }
 
+    // For similarity search
+    if (!metadata) {
+      console.log('Performing similarity search for:', {
+        searchText: text.substring(0, 50) + '...',
+        textLength: text.length
+      })
+
+      const similar = await findSimilar(text, 5) // Get top 5 matches
+      
+      // Log the results for debugging
+      console.log('Similarity search results:', {
+        query: text.substring(0, 50) + '...',
+        resultCount: similar.length,
+        results: similar.map(s => ({
+          score: s.score,
+          text: s.metadata.text.substring(0, 50) + '...',
+          page: s.metadata.pageNumber
+        }))
+      })
+
+      return NextResponse.json({ similar })
+    }
+
     // If we have metadata, try to store the embedding
     if (metadata) {
       // Check if this specific page already exists
@@ -63,15 +86,10 @@ export async function POST(req) {
       })
     }
 
-    // If no metadata, just find similar passages
-    const similar = await findSimilar(text)
-    return NextResponse.json({ similar })
-
   } catch (error) {
     console.error('Error in similar route:', {
       error: error.message,
-      stack: error.stack,
-      metadata: metadata || 'no metadata'
+      stack: error.stack
     })
     return NextResponse.json(
       { error: error.message }, 
