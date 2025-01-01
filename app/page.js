@@ -48,12 +48,26 @@ export default function Home() {
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [summary, setSummary] = useState('')
   const [isProcessingDocument, setIsProcessingDocument] = useState(false)
+  const [processedDocuments, setProcessedDocuments] = useState({})
+  const [notification, setNotification] = useState(null)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
   const textLayerRef = useRef(null)
   const pdfDocRef = useRef(null)
   const menuRef = useRef(null)
+
+  // Add useEffect to load from localStorage after mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('processedDocuments')
+      if (saved) {
+        setProcessedDocuments(JSON.parse(saved))
+      }
+    } catch (error) {
+      console.error('Error loading processed documents:', error)
+    }
+  }, []) // Empty dependency array means this runs once after mount
 
   // Load PDF document
   const loadPDF = async (file, doc = null) => {
@@ -68,7 +82,46 @@ export default function Home() {
         return
       }
 
-      console.log('Loading PDF:', {
+      // Check if document exists via API
+      const checkResponse = await fetch('/api/similar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          checkDocumentOnly: true,
+          metadata: {
+            pdfName: activeDoc.name
+          }
+        })
+      })
+
+      const { exists, pageCount, firstUploadedAt } = await checkResponse.json()
+
+      if (exists) {
+        console.log('Document already exists in Pinecone:', {
+          pdfName: activeDoc.name,
+          pageCount,
+          firstUploadedAt: new Date(firstUploadedAt).toLocaleString()
+        })
+
+        // Add notification
+        setNotification({
+          type: 'info',
+          message: `Document "${activeDoc.name}" already exists with ${pageCount} pages. First uploaded on ${new Date(firstUploadedAt).toLocaleString()}`
+        })
+
+        // Still render the document but skip processing
+        const arrayBuffer = await file.arrayBuffer()
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+        pdfDocRef.current = pdf
+        setNumPages(pdf.numPages)
+        setCurrentPage(1)
+        renderPage(1, activeDoc)
+        return
+      }
+
+      console.log('Loading new PDF for processing:', {
         fileName: file.name,
         isNewDocument: activeDoc?.isNewDocument,
         documentId: activeDoc?.id
@@ -99,6 +152,10 @@ export default function Home() {
       renderPage(1, activeDoc)
     } catch (error) {
       console.error('Error loading PDF:', error)
+      setNotification({
+        type: 'error',
+        message: 'Error loading PDF: ' + error.message
+      })
     }
   }
 
@@ -163,7 +220,7 @@ export default function Home() {
   }
 
   // Handle file upload
-  const handleFileUpload = (event) => {
+  const handleFileUpload = async (event) => {
     const file = event.target.files[0]
     if (file && file.type === 'application/pdf') {
       console.log('Uploading new document:', {
@@ -180,41 +237,27 @@ export default function Home() {
         footnotesHistory: {},
         footnoteCounter: 1,
         isNewDocument: true,
-        file: file // Store the file in the document object
+        file: file
       }
 
-      // Update state and localStorage
+      // Update state
       const updatedDocuments = [...documents, newDoc]
       setDocuments(updatedDocuments)
       
-      // Store document metadata in localStorage (without the file)
+      // Store document metadata in localStorage
       const docForStorage = { ...newDoc }
-      delete docForStorage.file // Remove file before storing
+      delete docForStorage.file
       localStorage.setItem('pdfDocuments', JSON.stringify(updatedDocuments.map(d => {
         const docCopy = { ...d }
         delete docCopy.file
         return docCopy
       })))
 
-      // Reset processed pages for new document
-      const newProcessedPages = new Set()
-      setProcessedPagesMap(prev => ({
-        ...prev,
-        [newDoc.id]: newProcessedPages
-      }))
-
-      console.log('Created new document object:', {
-        id: newDoc.id,
-        name: newDoc.name,
-        isNewDocument: newDoc.isNewDocument,
-        processedPages: Array.from(newProcessedPages)
-      })
-
       setCurrentDocument(newDoc)
       setPdfFile(file)
       
-      // Pass the document directly to loadPDF
-      loadPDF(file, newDoc)
+      // Process the PDF
+      await loadPDF(file, newDoc)
     }
   }
 
@@ -716,64 +759,6 @@ export default function Home() {
     }
   }
 
-  // Update storePageEmbeddings function
-  const storePageEmbeddings = async (text, pageNumber, metadata) => {
-    console.log('Starting embedding process:', {
-      pageNumber,
-      documentId: metadata.documentId,
-      textLength: text.length
-    })
-    
-    setIsStoringEmbeddings(true)
-    try {
-      console.log('Storing embeddings with metadata:', {
-        text: text.substring(0, 50) + '...',
-        pageNumber,
-        metadata
-      })
-
-      const response = await fetch('/api/similar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text,
-          pageNumber,
-          metadata: {
-            documentId: metadata.documentId,
-            pdfName: metadata.pdfName,
-            pageNumber
-          },
-          store: true
-        }),
-      })
-
-      console.log('Embedding API response:', {
-        status: response.status,
-        ok: response.ok
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        console.error('Embedding API error:', error)
-        throw new Error(error.details || 'Failed to store embeddings')
-      }
-
-      const data = await response.json()
-      if (!data.success) {
-        console.error('Embedding storage failed:', data)
-        throw new Error('Failed to store embeddings')
-      }
-      
-      console.log('Successfully stored embeddings for page:', pageNumber)
-    } catch (error) {
-      console.error('Failed to store embeddings:', error)
-    } finally {
-      setIsStoringEmbeddings(false)
-    }
-  }
-
   // Add handler for manual similarity search
   const handleManualSearch = async () => {
     if (!searchQuery.trim()) return
@@ -846,75 +831,57 @@ export default function Home() {
   }
 
   // Update processPage function
-  async function processPage(page, doc) {
+  const processPage = async (page, doc) => {
     try {
-      const content = await page.getTextContent()
+      const textContent = await page.getTextContent()
+      const pageText = textContent.items.map(item => item.str).join(' ')
       
-      // Sort items by vertical position
-      const sortedItems = content.items.sort((a, b) => {
-        const yDiff = b.transform[5] - a.transform[5]
-        return Math.abs(yDiff) < 5 ? a.transform[4] - b.transform[4] : yDiff
+      console.log('Processing page:', {
+        pageNumber: page._pageIndex + 1,
+        documentId: doc.id,
+        textLength: pageText.length
       })
-      
-      // Group items into paragraphs
-      const paragraphs = []
-      let currentParagraph = []
-      let lastY = null
-      let lastX = null
-      
-      for (const item of sortedItems) {
-        const { str, transform } = item
-        const [, , , , x, y] = transform
-        
-        const isNewParagraph = lastY !== null && 
-          (Math.abs(y - lastY) > 15 || 
-           (Math.abs(y - lastY) > 5 && x < lastX))
-        
-        if (isNewParagraph && currentParagraph.length > 0) {
-          paragraphs.push(currentParagraph.join(' '))
-          currentParagraph = []
-        }
-        
-        currentParagraph.push(str)
-        lastY = y
-        lastX = x
-      }
-      
-      if (currentParagraph.length > 0) {
-        paragraphs.push(currentParagraph.join(' '))
-      }
-      
-      const pageText = paragraphs
-        .filter(p => p.trim().length > 0)
-        .join('\n\n')
-        .trim()
-      
-      if (pageText.length > 0) {
-        const wasStored = await storePageEmbeddings(pageText, page.pageNumber, {
-          documentId: doc.id,
-          pdfName: doc.name,
-          isLastChunk: true
-        })
 
-        if (wasStored) {
-          console.log('Successfully processed page:', {
+      // Use the API endpoint for both checking and storing
+      const response = await fetch('/api/similar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: pageText,
+          metadata: {
             documentId: doc.id,
-            pageNumber: page.pageNumber
-          })
-        } else {
-          console.log('Page already exists in database:', {
-            documentId: doc.id,
-            pageNumber: page.pageNumber
-          })
-        }
+            pageNumber: page._pageIndex + 1,
+            pdfName: doc.name
+          }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to process page')
+      }
+
+      const result = await response.json()
+      
+      if (result.exists) {
+        console.log('Page already exists:', {
+          documentId: doc.id,
+          pageNumber: page._pageIndex + 1
+        })
       } else {
-        console.log('Skipping page - insufficient text:', {
-          pageNumber: page.pageNumber,
-          textLength: pageText.length
+        console.log('Page processed successfully:', {
+          documentId: doc.id,
+          pageNumber: page._pageIndex + 1
         })
       }
+
     } catch (error) {
-      console.error('Error processing page:', error)
+      console.error('Error processing page:', {
+        pageNumber: page._pageIndex + 1,
+        error: error.message
+      })
+      throw error
     }
   }
 
@@ -960,9 +927,47 @@ export default function Home() {
     }
   }, [])
 
+  // Add cleanup function for document processing state
+  const clearProcessedDocuments = () => {
+    if (typeof window !== 'undefined') {
+      setProcessedDocuments({})
+      localStorage.removeItem('processedDocuments')
+      console.log('Cleared processed documents state')
+    }
+  }
+
   return (
     <main className="flex min-h-screen">
-      <div className="flex-1 p-4">
+      {notification && (
+        <div 
+          className={`fixed top-4 right-4 p-4 rounded shadow-lg z-50 flex items-center ${
+            notification.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+          } text-white max-w-md`}
+          style={{ transform: 'translateX(0)' }}
+        >
+          <span className="flex-1 mr-2">{notification.message}</span>
+          <button 
+            onClick={() => setNotification(null)}
+            className="ml-2 text-white hover:text-gray-200 p-1 rounded-full hover:bg-black/10 flex items-center justify-center"
+            aria-label="Close notification"
+          >
+            <svg 
+              className="w-5 h-5" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M6 18L18 6M6 6l12 12" 
+              />
+            </svg>
+          </button>
+        </div>
+      )}
+      <div className="flex-1 p-4 relative">
         {/* PDF Upload and Document Selection Section */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-4">

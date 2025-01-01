@@ -197,77 +197,41 @@ export async function storeEmbedding(text, metadata) {
         throw new Error('Pinecone index not initialized')
     }
 
-    // Improved check for existing embeddings
     try {
-        const existingResults = await index.query({
-            vector: Array(768).fill(0),
-            topK: 1,
-            filter: {
-                $and: [
-                    { documentId: { $eq: metadata.documentId } },
-                    { pageNumber: { $eq: metadata.pageNumber } }
-                ]
-            },
-            includeMetadata: true
-        })
+        console.log('Creating new embedding for:', {
+            pdfName: metadata.pdfName,
+            pageNumber: metadata.pageNumber,
+            textLength: text.length
+        });
 
-        if (existingResults.matches && existingResults.matches.length > 0) {
-            console.log('Skipping: Embeddings exist for document:', {
-                documentId: metadata.documentId,
-                pageNumber: metadata.pageNumber,
-                existingId: existingResults.matches[0].id
-            })
-            return false // Return false to indicate no new embeddings were created
-        }
+        const embedding = await createEmbedding(text);
+        const id = `${metadata.documentId}-${metadata.pageNumber}-${Date.now()}`;
 
-        console.log('No existing embeddings found, proceeding with creation for:', {
-            documentId: metadata.documentId,
-            pageNumber: metadata.pageNumber
-        })
-    } catch (error) {
-        console.error('Error checking existing embeddings:', error)
-        throw error
-    }
-
-    // Split text into chunks
-    const chunks = splitIntoChunks(text)
-    
-    // Validate we have chunks to store
-    if (chunks.length === 0) {
-        return
-    }
-    
-    const embeddings = []
-
-    // Create embeddings for each chunk
-    for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i]
-        const embedding = await createEmbedding(chunk.text)
-
-        // Create a unique ID that includes all relevant metadata
-        const id = `${metadata.documentId}-${metadata.pageNumber}-${i}-${Date.now()}`
-    
-        embeddings.push({
+        await index.upsert([{
             id,
             values: embedding,
             metadata: {
                 ...metadata,
-                text: chunk.text,
-                chunkIndex: i,
-                totalChunks: chunks.length,
-                sentences: chunk.sentences,
-                timestamp: Date.now() // Add timestamp for versioning
+                text,
+                timestamp: Date.now()
             }
-        })
-    }
+        }]);
 
-    // Store all chunks
-    await index.upsert(embeddings)
-    console.log('Successfully stored embeddings:', {
-        count: embeddings.length,
-        documentId: metadata.documentId,
-        pageNumber: metadata.pageNumber
-    })
+        console.log('Successfully stored embedding:', {
+            id,
+            pdfName: metadata.pdfName,
+            pageNumber: metadata.pageNumber
+        });
+
+        return true;
+    } catch (error) {
+        console.error('Error storing embedding:', {
+            error: error.message,
+            metadata,
+            stack: error.stack
+        });
+        throw error;
+    }
 }
 
 
@@ -277,124 +241,157 @@ export async function findSimilar(text, limit = 5) {
       throw new Error('Pinecone index not initialized')
     }
     
-    // Improved key terms extraction
-    const keyTerms = text.toLowerCase()
-      .replace(/^(who|what|where|when|why|how)\s+(is|are|was|were|do|does|did)\s+/i, '')
-      .replace(/\?+$/, '')
-      .trim()
+    // Create embedding for search query
+    const queryEmbedding = await createEmbedding(text)
     
-    // Create embeddings for both original query and key terms
-    const [queryEmbedding, keyTermsEmbedding] = await Promise.all([
-      createEmbedding(text),
-      createEmbedding(keyTerms)
-    ])
-    
-    // Try hybrid search with both embeddings
-    const [queryResults, keyTermResults] = await Promise.all([
-      index.query({
-        vector: queryEmbedding,
-        topK: limit * 3, // Increased to get more potential matches
-        includeMetadata: true
-      }),
-      index.query({
-        vector: keyTermsEmbedding,
-        topK: limit * 3,
-        includeMetadata: true
-      })
-    ])
-  
-    // Combine and deduplicate results
-    const allMatches = [...queryResults.matches, ...keyTermResults.matches]
-    const uniqueMatches = Array.from(new Map(
-      allMatches.map(match => [match.metadata.text, match])
-    ).values())
-  
-    // Post-process results to prioritize exact matches
-    const processedResults = uniqueMatches.map(match => {
-      const matchText = match.metadata.text.toLowerCase()
-      const searchTerms = keyTerms.split(' ').filter(term => term.length > 2)
-      
-      // Calculate term match score
-      let termMatchCount = 0
-      searchTerms.forEach(term => {
-        if (matchText.includes(term.toLowerCase())) {
-          termMatchCount++
-        }
-      })
-      const termMatchScore = termMatchCount / searchTerms.length
-  
-      // Score calculation:
-      // - Exact phrase match: 1.0
-      // - All terms match but not as phrase: 0.9
-      // - Partial term matches: proportional to matched terms
-      // - Semantic similarity: original score if no term matches
-      let score = match.score // Start with semantic similarity
-      
-      if (matchText.includes(keyTerms.toLowerCase())) {
-        score = 1.0 // Exact phrase match
-      } else if (termMatchScore === 1) {
-        score = 0.9 // All terms match but not as phrase
-      } else if (termMatchScore > 0) {
-        score = Math.max(0.5 + (termMatchScore * 0.3), match.score)
-      }
-  
-      return {
-        ...match,
-        score,
-        debugInfo: {
-          termMatchScore,
-          originalScore: match.score,
-          matchedTerms: searchTerms.filter(term => matchText.includes(term.toLowerCase()))
-        }
-      }
+    // Get ALL available results when dataset is small
+    const results = await index.query({
+      vector: queryEmbedding,
+      topK: 10, // Get all records when we have a small dataset
+      includeMetadata: true
     })
-  
-    // Sort and filter results
-    const sortedResults = processedResults
-      .sort((a, b) => b.score - a.score)
-      .filter(match => {
-        // Must have either:
-        // 1. At least one matching term and score >= 0.5
-        // 2. High semantic similarity (>= 0.7) even without term matches
-        return (
-          (match.debugInfo.termMatchScore > 0 && match.score >= 0.5) ||
-          match.originalScore >= 0.7
-        )
+
+    if (!results.matches || results.matches.length === 0) {
+      return []
+    }
+
+    // Post-process results with much stricter filtering for small datasets
+    const processedResults = results.matches
+      .map(match => {
+        const matchText = match.metadata.text.toLowerCase()
+        const searchText = text.toLowerCase()
+        
+        // Calculate text matching score
+        let textMatchScore = 0
+        let exactPhraseMatch = false
+        
+        // First check for exact phrase match
+        if (matchText.includes(searchText)) {
+          textMatchScore = 1.0
+          exactPhraseMatch = true
+        } else {
+          // Check for individual terms
+          const searchTerms = searchText.split(' ')
+            .filter(term => term.length > 2)
+            .sort((a, b) => b.length - a.length)
+          
+          const matchedTerms = searchTerms.map(term => {
+            const termIndex = matchText.indexOf(term)
+            if (termIndex === -1) return null
+            
+            // Check if it's a whole word match
+            const beforeChar = termIndex > 0 ? matchText[termIndex - 1] : ' '
+            const afterChar = termIndex + term.length < matchText.length ? 
+              matchText[termIndex + term.length] : ' '
+            
+            if (/\W/.test(beforeChar) && /\W/.test(afterChar)) {
+              return { term, index: termIndex }
+            }
+            return null
+          }).filter(Boolean)
+          
+          if (matchedTerms.length > 0) {
+            // Calculate proximity score
+            const positions = matchedTerms.map(m => m.index)
+            const maxDistance = Math.max(...positions) - Math.min(...positions)
+            const proximityScore = maxDistance < 50 ? 1.0 : 
+                                 maxDistance < 100 ? 0.8 : 0.5
+            
+            textMatchScore = (matchedTerms.length / searchTerms.length) * proximityScore
+          }
+        }
+
+        // For small datasets, heavily prioritize exact matches
+        const combinedScore = exactPhraseMatch ? 
+          1.0 : // Perfect score for exact matches
+          (match.score * 0.1) + (textMatchScore * 0.9) // Almost completely ignore semantic similarity
+
+        return {
+          ...match,
+          score: combinedScore,
+          textMatchScore,
+          exactPhraseMatch
+        }
       })
+      .filter(match => {
+        // For small datasets, only return exact matches or very strong term matches
+        if (match.exactPhraseMatch) return true
+        
+        // If no exact matches, require at least one search term to be present as a whole word
+        const searchTerms = text.toLowerCase().split(' ').filter(term => term.length > 2)
+        return searchTerms.some(term => {
+          const termIndex = match.metadata.text.toLowerCase().indexOf(term)
+          if (termIndex === -1) return false
+          
+          const beforeChar = termIndex > 0 ? match.metadata.text[termIndex - 1] : ' '
+          const afterChar = termIndex + term.length < match.metadata.text.length ? 
+            match.metadata.text[termIndex + term.length] : ' '
+          
+          return /\W/.test(beforeChar) && /\W/.test(afterChar)
+        })
+      })
+      .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-  
-    return sortedResults
+
+    return processedResults
 }
   
 
 // --- Simplified Store Page Embeddings Function ---
+// Add a delay utility function
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Add a function to wait for document to be indexed
+async function waitForDocumentIndexing(pdfName, maxAttempts = 5) {
+    for (let i = 0; i < maxAttempts; i++) {
+        console.log(`Checking document indexing (attempt ${i + 1}/${maxAttempts}):`, {
+            pdfName,
+            timestamp: Date.now()
+        });
+
+        const results = await index.query({
+            vector: Array(768).fill(0),
+            topK: 1,
+            filter: {
+                pdfName: { $eq: pdfName }
+            },
+            includeMetadata: true
+        });
+
+        if (results.matches && results.matches.length > 0) {
+            console.log('Document found in index:', {
+                pdfName,
+                attempt: i + 1,
+                matches: results.matches.length
+            });
+            return true;
+        }
+
+        // Wait before next attempt (increasing delay)
+        await wait(1000 * (i + 1));
+    }
+    return false;
+}
+
+// Update storePageEmbeddings to use a lock mechanism
+const processingDocuments = new Set();
+
 export async function storePageEmbeddings(text, pageNumber, metadata) {
     try {
-        console.log('\n=== Processing Complete Page ===')
-        console.log('Checking embeddings for:', {
-            documentId: metadata.documentId,
-            pageNumber: pageNumber,
-            textLength: text.length
-        })
-        
+        const { pdfName } = metadata;
+
+        // Store the embedding without rechecking document existence
+        // (we already checked at the document level)
         const stored = await storeEmbedding(text, {
             pageNumber,
             documentId: metadata.documentId,
             pdfName: metadata.pdfName
-        })
+        });
 
-        if (stored === false) {
-            console.log('Page already processed:', {
-                documentId: metadata.documentId,
-                pageNumber: pageNumber
-            })
-            return false
-        }
-
-        return true
+        return stored;
     } catch (error) {
-        console.error('Error storing embeddings:', error)
-        throw error
+        console.error('Error storing embeddings:', error);
+        throw error;
     }
 }
 
@@ -404,27 +401,19 @@ export async function storeDocumentEmbeddings(pages, metadata) {
         throw new Error('Pinecone index not initialized')
     }
 
-    // Check if document already exists
     try {
-        const existingResults = await index.query({
-            vector: Array(768).fill(0),
-            topK: 1,
-            filter: {
-                documentId: { $eq: metadata.documentId }
-            },
-            includeMetadata: true
-        })
-
-        if (existingResults.matches && existingResults.matches.length > 0) {
-            console.log('Document already exists:', {
-                documentId: metadata.documentId,
-                existingId: existingResults.matches[0].id
+        // Check if document already exists by name
+        const documentExists = await checkDocumentByName(metadata.pdfName)
+        if (documentExists) {
+            console.log('Document already exists in Pinecone:', {
+                pdfName: metadata.pdfName
             })
             return false
         }
 
         console.log('Processing new document:', {
             documentId: metadata.documentId,
+            pdfName: metadata.pdfName,
             totalPages: pages.length
         })
 
@@ -466,6 +455,7 @@ export async function storeDocumentEmbeddings(pages, metadata) {
         await index.upsert(embeddings)
         console.log('Successfully stored document embeddings:', {
             documentId: metadata.documentId,
+            pdfName: metadata.pdfName,
             totalEmbeddings: embeddings.length,
             totalPages: pages.length
         })
@@ -474,5 +464,74 @@ export async function storeDocumentEmbeddings(pages, metadata) {
     } catch (error) {
         console.error('Error storing document embeddings:', error)
         throw error
+    }
+}
+
+// Add a function to check if document exists in Pinecone
+export async function checkDocumentExists(documentId, pageNumber) {
+    if (!index) {
+        throw new Error('Pinecone index not initialized')
+    }
+
+    try {
+        // Query Pinecone with a zero vector but use metadata filter
+        const results = await index.query({
+            vector: Array(768).fill(0), // Dummy vector
+            topK: 1,
+            filter: {
+                documentId: { $eq: documentId },
+                pageNumber: { $eq: pageNumber }
+            },
+            includeMetadata: true
+        })
+
+        return results.matches && results.matches.length > 0
+    } catch (error) {
+        console.error('Error checking document existence:', error)
+        return false
+    }
+}
+
+// Add function to check if document exists by name
+export async function checkDocumentByName(pdfName) {
+    if (!index) {
+        throw new Error('Pinecone index not initialized')
+    }
+
+    try {
+        console.log('Checking document by name in Pinecone:', {
+            pdfName,
+            timestamp: Date.now()
+        })
+
+        // Query Pinecone with a zero vector but use metadata filter for pdfName
+        const results = await index.query({
+            vector: Array(768).fill(0),
+            topK: 10, // Increase to check for multiple matches
+            filter: {
+                pdfName: { $eq: pdfName }
+            },
+            includeMetadata: true
+        })
+
+        const hasMatches = results.matches && results.matches.length > 0
+        console.log('Pinecone document check results:', {
+            pdfName,
+            hasMatches,
+            matchCount: results.matches?.length || 0,
+            matches: results.matches?.map(match => ({
+                id: match.id,
+                metadata: match.metadata
+            }))
+        })
+
+        return hasMatches
+    } catch (error) {
+        console.error('Error checking document in Pinecone:', {
+            pdfName,
+            error: error.message,
+            stack: error.stack
+        })
+        return false
     }
 }

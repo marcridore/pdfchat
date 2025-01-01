@@ -17,44 +17,50 @@ export default function ChatModal({ isOpen, onClose, pdfName }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim()) return
     
+    if (!input.trim()) return
+
     setIsLoading(true)
     const userMessage = input.trim()
     setInput('')
     
-    // Add user message to chat history
-    const newHistory = [...chatHistory, { role: 'user', content: userMessage }]
-    setChatHistory(newHistory)
-    
+    // Add user message immediately
+    setChatHistory(prev => [...prev, { role: 'user', content: userMessage }])
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           question: userMessage,
           pdfName,
-          messages: newHistory,
-          previousContext: chatHistory
-            .filter(msg => msg.context)
-            .flatMap(msg => msg.context)
+          messages: chatHistory
         }),
       })
 
-      if (!response.ok) throw new Error('Failed to get chat response')
+      const data = await response.json()
 
-      const { answer, context } = await response.json()
-      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get chat response')
+      }
+
+      // Add assistant message with context
       setChatHistory(prev => [...prev, {
         role: 'assistant',
-        content: answer,
-        context
+        content: data.answer,
+        context: data.context
       }])
+
     } catch (error) {
       console.error('Chat error:', error)
+      
+      // Add error message to chat
       setChatHistory(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error processing your question.'
+        content: `Sorry, I encountered an error: ${error.message}. Please try again.`,
+        error: true
       }])
     } finally {
       setIsLoading(false)
@@ -84,38 +90,35 @@ export default function ChatModal({ isOpen, onClose, pdfName }) {
           {chatHistory.map((message, index) => (
             <div
               key={index}
-              className={`flex ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
+              className={`flex flex-col ${
+                message.role === 'user' ? 'items-end' : 'items-start'
               }`}
             >
               <div
-                className={`max-w-[80%] rounded-lg p-3 ${
+                className={`rounded-lg p-3 max-w-[80%] ${
                   message.role === 'user'
                     ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-900'
+                    : message.error 
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-gray-100'
                 }`}
               >
-                <div className="prose">
-                  {message.content}
-                  {message.context && (
-                    <div className="mt-2 text-xs text-gray-500 border-t pt-2">
-                      <p className="font-semibold mb-1">Source{message.context.length > 1 ? 's' : ''}:</p>
-                      {message.context.map((ctx, i) => (
-                        <div key={i} className="mt-1">
-                          <span className="font-medium">
-                            {ctx.document && `${ctx.document} - `}Page {ctx.page}
-                          </span>
-                          {ctx.similarity && (
-                            <span className="text-gray-400 ml-1"> 
-                              (Relevance: {ctx.similarity}%)
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <p className="whitespace-pre-wrap">{message.content}</p>
               </div>
+              {message.context && !message.error && (
+                <div className="mt-2 text-xs text-gray-500">
+                  <p className="font-semibold">Based on these passages:</p>
+                  {message.context.map((ctx, i) => (
+                    <div key={i} className="mt-1 p-2 bg-gray-50 rounded">
+                      <p>{ctx.text}</p>
+                      <p className="mt-1 text-gray-400">
+                        Page {ctx.page} - 
+                        Similarity: {ctx.similarity}%
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           <div ref={messagesEndRef} />
