@@ -69,6 +69,7 @@ export default function Home() {
   const textLayerRef = useRef(null)
   const pdfDocRef = useRef(null)
   const menuRef = useRef(null)
+  const currentRenderTask = useRef(null)
 
   // Add useEffect to load from localStorage after mount
   useEffect(() => {
@@ -105,10 +106,8 @@ export default function Home() {
       cleanupCanvas()
       resetOutputs()
 
-      // Wait a tick for React to update the DOM
       await new Promise(resolve => setTimeout(resolve, 0))
 
-      // Check if canvas is ready
       if (!canvasRef.current) {
         throw new Error('Canvas not ready')
       }
@@ -119,20 +118,27 @@ export default function Home() {
       setNumPages(pdf.numPages)
       setCurrentPage(1)
 
-      // Render first page
+      // Render first page for viewing
       await renderPage(1, activeDoc)
       setIsPdfLoading(false)
 
-      // Process remaining pages in background
-      for (let pageNum = 2; pageNum <= pdf.numPages; pageNum++) {
+      // Process all pages including first page
+      setIsProcessingDocument(true)
+      console.log(`Starting to process all pages for ${activeDoc.name}`)
+      
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
         await processPage(page, activeDoc)
-        console.log(`Processed page ${pageNum} in background`)
+        console.log(`Processed page ${pageNum}/${pdf.numPages} for ${activeDoc.name}`)
       }
+
+      console.log(`Completed processing all pages for ${activeDoc.name}`)
+      setIsProcessingDocument(false)
 
     } catch (error) {
       console.error('Error loading PDF:', error)
       setIsPdfLoading(false)
+      setIsProcessingDocument(false)
       setNotification({
         type: 'error',
         message: 'Failed to load PDF'
@@ -142,12 +148,15 @@ export default function Home() {
 
   // Add a cleanup function
   const cleanupCanvas = () => {
+    if (currentRenderTask.current) {
+      currentRenderTask.current.cancel()
+      currentRenderTask.current = null
+    }
+
     const canvas = canvasRef.current
     if (canvas) {
       const context = canvas.getContext('2d')
-      // Clear the entire canvas
       context.clearRect(0, 0, canvas.width, canvas.height)
-      // Reset canvas dimensions
       canvas.width = 0
       canvas.height = 0
     }
@@ -170,13 +179,18 @@ export default function Home() {
     }
 
     try {
+      // Cancel any ongoing render task
+      if (currentRenderTask.current) {
+        await currentRenderTask.current.cancel()
+        currentRenderTask.current = null
+      }
+
       const page = await pdfDocRef.current.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       
       const canvas = canvasRef.current
       const context = canvas.getContext('2d')
       
-      // Ensure canvas and context exist
       if (!canvas || !context) {
         console.log('Canvas or context not available')
         return
@@ -190,11 +204,13 @@ export default function Home() {
         viewport: viewport
       }
       
-      await page.render(renderContext).promise
-      
-      // Check text layer reference before updating
+      // Store the render task
+      currentRenderTask.current = page.render(renderContext)
+      await currentRenderTask.current.promise
+      currentRenderTask.current = null
+
+      // Process text layer
       if (textLayerRef.current) {
-        // Update text layer
         const textContent = await page.getTextContent()
         const textLayer = textLayerRef.current
         
@@ -209,17 +225,20 @@ export default function Home() {
           textDivs: []
         })
 
-        // After getting text content, update currentPageContent
         const pageText = textContent.items.map(item => item.str).join(' ')
         setCurrentPageContent(pageText)
       }
 
     } catch (error) {
-      console.error('Error rendering page:', error)
-      setNotification({
-        type: 'error',
-        message: 'Failed to render page'
-      })
+      if (error.name === 'RenderingCancelled') {
+        console.log('Rendering was cancelled')
+      } else {
+        console.error('Error rendering page:', error)
+        setNotification({
+          type: 'error',
+          message: 'Failed to render page'
+        })
+      }
     }
   }
 
@@ -1012,11 +1031,13 @@ export default function Home() {
         {/* PDF Viewer */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="relative mx-auto" style={{ width: 'fit-content' }}>
-            {currentDocument && isPdfLoading && (
+            {currentDocument && (isPdfLoading || isProcessingDocument) && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm text-gray-600 font-medium">Loading PDF...</p>
+                  <p className="text-sm text-gray-600 font-medium">
+                    {isPdfLoading ? 'Loading PDF...' : 'Processing document & creating embeddings...'}
+                  </p>
                 </div>
               </div>
             )}
