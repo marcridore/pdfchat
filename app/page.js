@@ -8,6 +8,7 @@ import {
   storePageEmbeddings, 
   storeDocumentEmbeddings 
 } from './lib/embeddings'
+import DocumentQA from './components/DocumentQnA'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -50,6 +51,8 @@ export default function Home() {
   const [isProcessingDocument, setIsProcessingDocument] = useState(false)
   const [processedDocuments, setProcessedDocuments] = useState({})
   const [notification, setNotification] = useState(null)
+  const [isQAOpen, setIsQAOpen] = useState(false)
+  const [currentPageContent, setCurrentPageContent] = useState('')
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -213,6 +216,10 @@ export default function Home() {
         viewport: viewport,
         textDivs: []
       })
+
+      // After getting text content, update currentPageContent
+      const pageText = textContent.items.map(item => item.str).join(' ')
+      setCurrentPageContent(pageText)
 
     } catch (error) {
       console.error('Error rendering page:', error)
@@ -1588,6 +1595,65 @@ export default function Home() {
           <span>Processing document...</span>
         </div>
       )}
+
+      {/* Add Q&A and Chat buttons */}
+      <div className="fixed bottom-4 right-4 flex gap-2">
+        {/* Q&A Button */}
+        <button
+          onClick={() => setIsQAOpen(true)}
+          className="bg-green-500 text-white p-3 rounded-full shadow-lg hover:bg-green-600"
+          title="Open Q&A"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+              d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+            />
+          </svg>
+        </button>
+
+        {/* Existing Chat Button */}
+        <button
+          onClick={() => setIsChatOpen(true)}
+          className="bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600"
+          title="Open Chat"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" 
+            />
+          </svg>
+        </button>
+      </div>
+
+      {/* Chat Modal */}
+      <ChatModal 
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        pdfName={currentDocument?.name || ''}
+        chatHistory={chatHistory}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        handleChat={handleChat}
+        isChatLoading={isChatLoading}
+      />
+
+      {/* Add loading indicator for document processing */}
+      {isProcessingDocument && (
+        <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          <span>Processing document...</span>
+        </div>
+      )}
+
+      {/* Add DocumentQA component */}
+      <DocumentQA 
+        isOpen={isQAOpen}
+        onClose={() => setIsQAOpen(false)}
+        pageContent={currentPageContent}
+        documentName={currentDocument?.name || ''}
+        currentPage={currentPage}
+        pdfDoc={pdfDocRef.current}
+      />
     </main>
   )
 }
