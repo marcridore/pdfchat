@@ -796,39 +796,44 @@ export default function Home() {
   // Add chat handler
   const handleChat = async () => {
     if (!chatInput.trim()) return
+
+    const userMessage = { role: 'user', content: chatInput }
     
-    setIsChatLoading(true)
-    const userMessage = chatInput.trim()
+    // Update chat immediately with user message
+    setChatHistory(prev => [...prev, userMessage])
     setChatInput('')
-    
-    setChatHistory(prev => [...prev, { role: 'user', content: userMessage }])
-    
+    setIsChatLoading(true)
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question: userMessage
-        }),
+          question: chatInput,
+          documentName: currentDocument?.name
+        })
       })
 
-      if (!response.ok) throw new Error('Failed to get chat response')
-
-      const { answer, context } = await response.json()
+      const data = await response.json()
       
-      // Add assistant message with context to chat history
-      setChatHistory(prev => [...prev, {
-        role: 'assistant',
-        content: answer,
-        context: context
-      }])
+      if (response.ok) {
+        // Create the assistant message with both response and context
+        const assistantMessage = {
+          role: 'assistant',
+          content: data.response,    // This is the LLM's response text
+          context: data.context      // This is the reference material
+        }
+        
+        // Add the complete message to chat history
+        setChatHistory(prev => [...prev, assistantMessage])
+      } else {
+        throw new Error(data.error || 'Failed to get response')
+      }
     } catch (error) {
       console.error('Chat error:', error)
       setChatHistory(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error processing your question.'
+        content: 'Sorry, I encountered an error processing your request.'
       }])
     } finally {
       setIsChatLoading(false)
