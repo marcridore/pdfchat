@@ -15,38 +15,36 @@ export async function POST(req) {
         score: result.score,
         page: result.metadata.pageNumber,
         fileName: result.metadata.pdfName,
-        confidence: result.score > 0.7 ? 'high' :
-                   result.score > 0.5 ? 'moderate' :
-                   result.score > 0.3 ? 'low' : 'very low'
+        confidence: result.score > 0.8 ? 'very high' :
+                   result.score > 0.6 ? 'high' :
+                   result.score > 0.4 ? 'moderate' :
+                   'low'
       }))
       .sort((a, b) => b.score - a.score)
 
     const prompt = `
-      As a helpful AI assistant, analyze the following context and question.
-      The context passages are ordered by relevance score, with higher scores indicating
-      stronger relevance to the question. Each passage includes its source file and page number.
+      You are a helpful AI assistant analyzing document content. Please provide a clear, direct answer 
+      based on the following context passages, which are ordered by relevance score.
 
       Question: "${question}"
 
-      Context from documents:
+      Context passages (with confidence scores):
       ${sortedResults.map(r => `
-        [Source: ${r.fileName}, Page ${r.page}, Relevance: ${r.confidence} (${(r.score * 100).toFixed(1)}%)]
-        ${r.text}
+        [Confidence: ${r.confidence} (${(r.score * 100).toFixed(1)}%), Source: ${r.fileName}, Page ${r.page}]
+        "${r.text}"
       `).join('\n\n')}
 
-      Please provide a response that:
-      1. Prioritizes information from passages with higher relevance scores
-      2. States confidence levels based on relevance scores
-      3. Cites specific sources (file names and page numbers) when providing information
-      4. Clearly distinguishes between high-confidence and low-confidence information
-      5. Suggests what additional information might be needed
+      Instructions:
+      1. If there's a very high confidence match (>80%), use that information directly and confidently
+      2. For high confidence matches (60-80%), provide the information while noting it's from a reliable source
+      3. For moderate matches (40-60%), include the information but express appropriate uncertainty
+      4. For low confidence matches (<40%), either:
+         - State that the information is not reliable enough to make claims
+         - Or explain that better sources are needed
+      5. Always cite your sources with page numbers
+      6. If the context doesn't contain relevant information, clearly state that
 
-      Response format:
-      - Lead with the most relevant information, citing sources
-      - Indicate confidence levels and sources for different pieces of information
-      - Use phrases like "According to [file], page [X]..." when citing sources
-      - Be clear about which parts are most reliable based on relevance scores
-      - Use professional language and maintain a helpful tone
+      Please provide a direct, clear answer that accurately reflects the confidence level of the sources.
     `.trim()
 
     const completion = await fetch('https://api.together.xyz/v1/chat/completions', {
@@ -58,7 +56,7 @@ export async function POST(req) {
       body: JSON.stringify({
         model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
+        temperature: 0.3,
         max_tokens: 500
       })
     })
