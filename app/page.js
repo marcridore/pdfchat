@@ -62,6 +62,7 @@ export default function Home() {
   const [notification, setNotification] = useState(null)
   const [isQAOpen, setIsQAOpen] = useState(false)
   const [currentPageContent, setCurrentPageContent] = useState('')
+  const [isPdfLoading, setIsPdfLoading] = useState(false)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -83,6 +84,7 @@ export default function Home() {
 
   // Load PDF document
   const loadPDF = async (file, doc = null) => {
+    setIsPdfLoading(true)
     const activeDoc = doc || currentDocument
 
     try {
@@ -91,53 +93,9 @@ export default function Home() {
           docName: activeDoc?.name,
           docId: activeDoc?.id
         })
+        setIsPdfLoading(false)
         return
       }
-
-      // Check if document exists via API
-      const checkResponse = await fetch('/api/similar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          checkDocumentOnly: true,
-          metadata: {
-            pdfName: activeDoc.name
-          }
-        })
-      })
-
-      const { exists, pageCount, firstUploadedAt } = await checkResponse.json()
-
-      if (exists) {
-        console.log('Document already exists in Pinecone:', {
-          pdfName: activeDoc.name,
-          pageCount,
-          firstUploadedAt: new Date(firstUploadedAt).toLocaleString()
-        })
-
-        // Add notification
-        setNotification({
-          type: 'info',
-          message: `Document "${activeDoc.name}" already exists with ${pageCount} pages. First uploaded on ${new Date(firstUploadedAt).toLocaleString()}`
-        })
-
-        // Still render the document but skip processing
-        const arrayBuffer = await file.arrayBuffer()
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-        pdfDocRef.current = pdf
-        setNumPages(pdf.numPages)
-        setCurrentPage(1)
-        renderPage(1, activeDoc)
-        return
-      }
-
-      console.log('Loading new PDF for processing:', {
-        fileName: file.name,
-        isNewDocument: activeDoc?.isNewDocument,
-        documentId: activeDoc?.id
-      })
 
       // Clean up previous PDF and canvas
       if (pdfDocRef.current) {
@@ -147,26 +105,37 @@ export default function Home() {
       cleanupCanvas()
       resetOutputs()
 
+      // Wait a tick for React to update the DOM
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      // Check if canvas is ready
+      if (!canvasRef.current) {
+        throw new Error('Canvas not ready')
+      }
+
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
       setCurrentPage(1)
 
-      // Process all pages in background
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      // Render first page
+      await renderPage(1, activeDoc)
+      setIsPdfLoading(false)
+
+      // Process remaining pages in background
+      for (let pageNum = 2; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
         await processPage(page, activeDoc)
         console.log(`Processed page ${pageNum} in background`)
       }
 
-      // Still render the first page for viewing
-      renderPage(1, activeDoc)
     } catch (error) {
       console.error('Error loading PDF:', error)
+      setIsPdfLoading(false)
       setNotification({
         type: 'error',
-        message: 'Error loading PDF: ' + error.message
+        message: 'Failed to load PDF'
       })
     }
   }
@@ -194,12 +163,24 @@ export default function Home() {
       return
     }
 
+    // Add check for canvas reference
+    if (!canvasRef.current) {
+      console.log('Canvas not ready')
+      return
+    }
+
     try {
       const page = await pdfDocRef.current.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       
       const canvas = canvasRef.current
       const context = canvas.getContext('2d')
+      
+      // Ensure canvas and context exist
+      if (!canvas || !context) {
+        console.log('Canvas or context not available')
+        return
+      }
       
       canvas.height = viewport.height
       canvas.width = viewport.width
@@ -211,27 +192,34 @@ export default function Home() {
       
       await page.render(renderContext).promise
       
-      // Update text layer
-      const textContent = await page.getTextContent()
-      const textLayer = textLayerRef.current
-      
-      textLayer.innerHTML = ''
-      textLayer.style.height = `${viewport.height}px`
-      textLayer.style.width = `${viewport.width}px`
-      
-      pdfjsLib.renderTextLayer({
-        textContent: textContent,
-        container: textLayer,
-        viewport: viewport,
-        textDivs: []
-      })
+      // Check text layer reference before updating
+      if (textLayerRef.current) {
+        // Update text layer
+        const textContent = await page.getTextContent()
+        const textLayer = textLayerRef.current
+        
+        textLayer.innerHTML = ''
+        textLayer.style.height = `${viewport.height}px`
+        textLayer.style.width = `${viewport.width}px`
+        
+        pdfjsLib.renderTextLayer({
+          textContent: textContent,
+          container: textLayer,
+          viewport: viewport,
+          textDivs: []
+        })
 
-      // After getting text content, update currentPageContent
-      const pageText = textContent.items.map(item => item.str).join(' ')
-      setCurrentPageContent(pageText)
+        // After getting text content, update currentPageContent
+        const pageText = textContent.items.map(item => item.str).join(' ')
+        setCurrentPageContent(pageText)
+      }
 
     } catch (error) {
       console.error('Error rendering page:', error)
+      setNotification({
+        type: 'error',
+        message: 'Failed to render page'
+      })
     }
   }
 
@@ -1024,10 +1012,27 @@ export default function Home() {
         {/* PDF Viewer */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="relative mx-auto" style={{ width: 'fit-content' }}>
-            <canvas ref={canvasRef} className="max-w-full" />
+            {currentDocument && isPdfLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-gray-600 font-medium">Loading PDF...</p>
+                </div>
+              </div>
+            )}
+            
+            <canvas 
+              ref={canvasRef} 
+              className={`max-w-full transition-opacity duration-300 ${
+                isPdfLoading ? 'opacity-0' : 'opacity-100'
+              }`} 
+            />
+            
             <div
               ref={textLayerRef}
-              className="absolute top-0 left-0 right-0 bottom-0 textLayer"
+              className={`absolute top-0 left-0 right-0 bottom-0 textLayer transition-opacity duration-300 ${
+                isPdfLoading ? 'opacity-0' : 'opacity-100'
+              }`}
               style={{ pointerEvents: 'all' }}
               onMouseUp={handleTextSelection}
               onMouseMove={handleTextHover}
