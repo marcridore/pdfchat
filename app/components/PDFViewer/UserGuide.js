@@ -10,23 +10,49 @@ export default function UserGuide() {
     {
       id: 'select',
       title: 'Select Text',
-      description: 'Click and drag to select text, or click at the start and end of a paragraph',
+      description: 'Click and drag to select text, or click at the start and end of a paragraph to select it',
       position: { top: '40%', left: '50%' },
     },
     {
       id: 'tools',
       title: 'Smart Tools',
-      description: 'Use the floating menu to translate, analyze, or create footnotes',
+      description: 'Use the floating menu to translate, analyze, create footnotes, find similar passages, or get summaries',
       position: { top: '50%', left: '50%' },
+    },
+    {
+      id: 'sidebar',
+      title: 'Results Panel',
+      description: 'View translations, analysis, footnotes, and search results in the right sidebar. You can resize it by dragging the left edge.',
+      position: { top: '30%', right: '400px' },
+      arrow: 'right'
+    },
+    {
+      id: 'tabs',
+      title: 'Navigation Tabs',
+      description: 'Switch between current results, history, footnotes, and search using these tabs',
+      position: { top: '80px', right: '300px' },
+      arrow: 'right'
+    },
+    {
+      id: 'qa',
+      title: 'Quick Q&A',
+      description: 'Click this button to ask specific questions about the current page',
+      position: { bottom: '120px', right: '100px' },
+      arrow: 'bottom-right'
+    },
+    {
+      id: 'chat',
+      title: 'Chat with PDF',
+      description: 'Have a natural conversation about your document using the chat feature',
+      position: { bottom: '60px', right: '100px' },
+      arrow: 'bottom-right'
     }
   ]
 
   useEffect(() => {
-    // Check if user has seen the guide before
     const hasSeenGuide = localStorage.getItem('hasSeenPDFGuide')
     
     if (!hasSeenGuide) {
-      // Show guide after a short delay
       const timer = setTimeout(() => {
         setShowGuide(true)
       }, 1500)
@@ -41,6 +67,26 @@ export default function UserGuide() {
   }
 
   const currentGuide = guides[step]
+
+  const getArrowStyles = (arrowDirection) => {
+    switch (arrowDirection) {
+      case 'right':
+        return {
+          className: 'absolute -right-8 top-1/2 transform -translate-y-1/2 rotate-90',
+          animate: { x: [0, 8, 0] }
+        }
+      case 'bottom-right':
+        return {
+          className: 'absolute -bottom-8 -right-8 transform rotate-45',
+          animate: { x: [0, 5, 0], y: [0, 5, 0] }
+        }
+      default:
+        return {
+          className: 'absolute left-1/2 -bottom-8 transform -translate-x-1/2',
+          animate: { y: [0, 8, 0] }
+        }
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -61,10 +107,7 @@ export default function UserGuide() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             className="fixed z-50 bg-white rounded-xl shadow-xl p-4 max-w-sm"
-            style={{
-              ...currentGuide.position,
-              transform: 'translate(-50%, -50%)'
-            }}
+            style={currentGuide.position}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -124,14 +167,14 @@ export default function UserGuide() {
               </div>
             </div>
 
-            {/* Animated arrow pointing to selection area */}
+            {/* Animated arrow */}
             <motion.div
-              animate={{ y: [0, 8, 0] }}
+              {...getArrowStyles(currentGuide.arrow)}
+              animate={getArrowStyles(currentGuide.arrow).animate}
               transition={{ repeat: Infinity, duration: 1.5 }}
-              className="absolute left-1/2 -bottom-8 transform -translate-x-1/2"
             >
               <svg 
-                className="w-6 h-6 text-white" 
+                className="w-6 h-6 text-white drop-shadow-lg" 
                 fill="currentColor" 
                 viewBox="0 0 24 24"
               >
