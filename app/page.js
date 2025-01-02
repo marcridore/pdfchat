@@ -63,6 +63,7 @@ export default function Home() {
   const [isQAOpen, setIsQAOpen] = useState(false)
   const [currentPageContent, setCurrentPageContent] = useState('')
   const [isPdfLoading, setIsPdfLoading] = useState(false)
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -106,39 +107,39 @@ export default function Home() {
       cleanupCanvas()
       resetOutputs()
 
-      await new Promise(resolve => setTimeout(resolve, 0))
-
-      if (!canvasRef.current) {
-        throw new Error('Canvas not ready')
-      }
-
+      // Load and render first page immediately
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
       setCurrentPage(1)
-
-      // Render first page for viewing
+      
+      // Render first page and make it visible quickly
       await renderPage(1, activeDoc)
       setIsPdfLoading(false)
 
-      // Process all pages including first page
+      // Start processing pages in background
       setIsProcessingDocument(true)
-      console.log(`Starting to process all pages for ${activeDoc.name}`)
+      setProcessingProgress({ current: 0, total: pdf.numPages })
       
+      // Process pages in background
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
         await processPage(page, activeDoc)
-        console.log(`Processed page ${pageNum}/${pdf.numPages} for ${activeDoc.name}`)
+        setProcessingProgress(prev => ({ 
+          ...prev, 
+          current: pageNum 
+        }))
       }
 
-      console.log(`Completed processing all pages for ${activeDoc.name}`)
       setIsProcessingDocument(false)
+      setProcessingProgress({ current: 0, total: 0 })
 
     } catch (error) {
       console.error('Error loading PDF:', error)
       setIsPdfLoading(false)
       setIsProcessingDocument(false)
+      setProcessingProgress({ current: 0, total: 0 })
       setNotification({
         type: 'error',
         message: 'Failed to load PDF'
@@ -969,8 +970,8 @@ export default function Home() {
         onClose={() => setNotification(null)} 
       />
 
-      {/* Main Content Area */}
-      <div className="flex-1 p-6 relative">
+      {/* Main Content Area with PDF Viewer */}
+      <div className="flex-1 p-6">
         {/* Header Section */}
         <div className="mb-6 flex items-center gap-4 flex-wrap">
           <input
@@ -1028,83 +1029,113 @@ export default function Home() {
           isAnalyzingImage={isAnalyzingImage}
         />
 
-        {/* PDF Viewer */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="relative mx-auto" style={{ width: 'fit-content' }}>
-            {currentDocument && (isPdfLoading || isProcessingDocument) && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm text-gray-600 font-medium">
-                    {isPdfLoading ? 'Loading PDF...' : 'Processing document & creating embeddings...'}
-                  </p>
+        {/* PDF Viewer Container with Processing Indicator */}
+        <div className="relative flex gap-6">
+          {/* PDF Viewer */}
+          <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden relative">
+            <div className="relative mx-auto" style={{ width: 'fit-content' }}>
+              {/* PDF Loading Indicator */}
+              {currentDocument && isPdfLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm text-gray-600 font-medium">Loading PDF...</p>
+                  </div>
+                </div>
+              )}
+              
+              <canvas 
+                ref={canvasRef} 
+                className={`max-w-full transition-opacity duration-300 ${
+                  isPdfLoading ? 'opacity-0' : 'opacity-100'
+                }`} 
+              />
+              
+              {/* Text Layer */}
+              <div
+                ref={textLayerRef}
+                className={`absolute top-0 left-0 right-0 bottom-0 textLayer transition-opacity duration-300 ${
+                  isPdfLoading ? 'opacity-0' : 'opacity-100'
+                }`}
+                style={{ pointerEvents: 'all' }}
+                onMouseUp={handleTextSelection}
+                onMouseMove={handleTextHover}
+                onMouseLeave={() => setShowFootnote(false)}
+              />
+              
+              {showMenu && (
+                <SelectionMenu 
+                  menuRef={menuRef}
+                  menuPosition={menuPosition}
+                  handleTranslate={handleTranslate}
+                  isTranslating={isTranslating}
+                  handleAnalyze={handleAnalyze}
+                  isAnalyzing={isAnalyzing}
+                  handleFootnoteButton={handleFootnoteButton}
+                  handleSimilaritySearch={handleSimilaritySearch}
+                  isSearchingSimilar={isSearchingSimilar}
+                  handleSummarize={handleSummarize}
+                  isSummarizing={isSummarizing}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Processing Indicator - Now between PDF and Sidebar */}
+          {isProcessingDocument && (
+            <div className="absolute right-[400px] top-4 z-50 bg-white/90 backdrop-blur-sm border border-gray-200 p-4 rounded-xl shadow-lg w-80">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm font-medium text-gray-700">Processing, Embedding document...</span>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-500 transition-all duration-300" 
+                      style={{ 
+                        width: `${(processingProgress.current / processingProgress.total) * 100}%` 
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Page {processingProgress.current} of {processingProgress.total}</span>
+                    <span>{Math.round((processingProgress.current / processingProgress.total) * 100)}%</span>
+                  </div>
                 </div>
               </div>
-            )}
-            
-            <canvas 
-              ref={canvasRef} 
-              className={`max-w-full transition-opacity duration-300 ${
-                isPdfLoading ? 'opacity-0' : 'opacity-100'
-              }`} 
-            />
-            
-            <div
-              ref={textLayerRef}
-              className={`absolute top-0 left-0 right-0 bottom-0 textLayer transition-opacity duration-300 ${
-                isPdfLoading ? 'opacity-0' : 'opacity-100'
-              }`}
-              style={{ pointerEvents: 'all' }}
-              onMouseUp={handleTextSelection}
-              onMouseMove={handleTextHover}
-              onMouseLeave={() => setShowFootnote(false)}
-            />
-            
-            {showMenu && (
-              <SelectionMenu 
-                menuRef={menuRef}
-                menuPosition={menuPosition}
-                handleTranslate={handleTranslate}
-                isTranslating={isTranslating}
-                handleAnalyze={handleAnalyze}
-                isAnalyzing={isAnalyzing}
-                handleFootnoteButton={handleFootnoteButton}
-                handleSimilaritySearch={handleSimilaritySearch}
-                isSearchingSimilar={isSearchingSimilar}
-                handleSummarize={handleSummarize}
-                isSummarizing={isSummarizing}
-              />
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Right Sidebar */}
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            selectedText={selectedText}
+            translatedText={translatedText}
+            isTranslating={isTranslating}
+            analysis={analysis}
+            summary={summary}
+            imageAnalysis={imageAnalysis}
+            isAnalyzingImage={isAnalyzingImage}
+            translationHistory={translationHistory}
+            footnotesHistory={footnotesHistory}
+            scrollToReference={scrollToReference}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            handleManualSearch={handleManualSearch}
+            isSearchingSimilar={isSearchingSimilar}
+            similarPassages={similarPassages}
+            setCurrentPage={setCurrentPage}
+            chatHistory={chatHistory}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            handleChat={handleChat}
+            isChatLoading={isChatLoading}
+          />
         </div>
       </div>
-
-      {/* Right Sidebar */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        selectedText={selectedText}
-        translatedText={translatedText}
-        isTranslating={isTranslating}
-        analysis={analysis}
-        summary={summary}
-        imageAnalysis={imageAnalysis}
-        isAnalyzingImage={isAnalyzingImage}
-        translationHistory={translationHistory}
-        footnotesHistory={footnotesHistory}
-        scrollToReference={scrollToReference}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        handleManualSearch={handleManualSearch}
-        isSearchingSimilar={isSearchingSimilar}
-        similarPassages={similarPassages}
-        setCurrentPage={setCurrentPage}
-        chatHistory={chatHistory}
-        chatInput={chatInput}
-        setChatInput={setChatInput}
-        handleChat={handleChat}
-        isChatLoading={isChatLoading}
-      />
 
       {/* Floating Elements */}
       {currentDocument && <UserGuide />}
@@ -1156,14 +1187,6 @@ export default function Home() {
         currentPage={currentPage}
         pdfDoc={pdfDocRef.current}
       />
-
-      {/* Loading States */}
-      {isProcessingDocument && (
-        <div className="fixed bottom-24 right-6 bg-blue-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-          <span>Processing document...</span>
-        </div>
-      )}
     </main>
   )
 }
