@@ -17,6 +17,7 @@ import CurrentTab from './components/Sidebar/CurrentTab'
 import FootnotesTab from './components/Sidebar/FootnotesTab'
 import SearchTab from './components/Sidebar/SearchTab'
 import Sidebar from './components/Sidebar/Sidebar'
+import UserGuide from './components/PDFViewer/UserGuide'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -961,6 +962,7 @@ export default function Home() {
         onClose={() => setNotification(null)} 
       />
 
+      {/* Main Content Area */}
       <div className="flex-1 p-6 relative">
         {/* Header Section */}
         <div className="mb-6 flex items-center gap-4 flex-wrap">
@@ -1078,6 +1080,9 @@ export default function Home() {
         isChatLoading={isChatLoading}
       />
 
+      {/* Floating Elements */}
+      {currentDocument && <UserGuide />}
+      
       {/* Floating Action Buttons */}
       <div className="fixed bottom-6 right-6 flex flex-col gap-3">
         <button
@@ -1105,7 +1110,7 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Chat Modal */}
+      {/* Modals */}
       <ChatModal 
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
@@ -1117,7 +1122,6 @@ export default function Home() {
         isChatLoading={isChatLoading}
       />
 
-      {/* Document QA Modal */}
       <DocumentQA 
         isOpen={isQAOpen}
         onClose={() => setIsQAOpen(false)}
