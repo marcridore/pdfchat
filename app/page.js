@@ -16,6 +16,7 @@ import DocumentQA from './components/DocumentQnA'
 import CurrentTab from './components/Sidebar/CurrentTab'
 import FootnotesTab from './components/Sidebar/FootnotesTab'
 import SearchTab from './components/Sidebar/SearchTab'
+import Sidebar from './components/Sidebar/Sidebar'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -1051,54 +1052,31 @@ export default function Home() {
       </div>
 
       {/* Right Sidebar */}
-      <div className="w-96 border-l border-gray-200 bg-white h-screen sticky top-0 overflow-y-auto">
-        <div className="p-4">
-          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
-          
-          <div className="mt-4">
-            {activeTab === 'current' && (
-              <CurrentTab
-                selectedText={selectedText}
-                translatedText={translatedText}
-                isTranslating={isTranslating}
-                analysis={analysis}
-                summary={summary}
-                imageAnalysis={imageAnalysis}
-                isAnalyzingImage={isAnalyzingImage}
-              />
-            )}
-
-            {activeTab === 'history' && (
-              <TranslationsCarousel translations={translationHistory} />
-            )}
-
-            {activeTab === 'footnotes' && (
-              <FootnotesTab
-                footnotesHistory={footnotesHistory}
-                scrollToReference={scrollToReference}
-              />
-            )}
-
-            {activeTab === 'search' && (
-              <SearchTab
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                handleManualSearch={handleManualSearch}
-                isSearchingSimilar={isSearchingSimilar}
-                similarPassages={similarPassages}
-                setCurrentPage={setCurrentPage}
-              />
-            )}
-
-            {activeTab === 'chat' && (
-              <div className="p-4">
-                <h2 className="text-lg font-bold mb-2">Chat with PDF</h2>
-                {/* Chat content */}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        selectedText={selectedText}
+        translatedText={translatedText}
+        isTranslating={isTranslating}
+        analysis={analysis}
+        summary={summary}
+        imageAnalysis={imageAnalysis}
+        isAnalyzingImage={isAnalyzingImage}
+        translationHistory={translationHistory}
+        footnotesHistory={footnotesHistory}
+        scrollToReference={scrollToReference}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        handleManualSearch={handleManualSearch}
+        isSearchingSimilar={isSearchingSimilar}
+        similarPassages={similarPassages}
+        setCurrentPage={setCurrentPage}
+        chatHistory={chatHistory}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        handleChat={handleChat}
+        isChatLoading={isChatLoading}
+      />
 
       {/* Floating Action Buttons */}
       <div className="fixed bottom-6 right-6 flex flex-col gap-3">
