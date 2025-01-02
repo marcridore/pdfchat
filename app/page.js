@@ -1,6 +1,10 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
+import DocumentControls from './components/Header/DocumentControls'
+import SelectionMenu from './components/PDFViewer/SelectionMenu'
+import TabNavigation from './components/Sidebar/TabNavigation'
+import Notification from './components/LoadingStates/Notification'
 import TranslationsCarousel from './components/TranslationsCarousel'
 import Tooltip from './components/Tooltip'
 import ChatModal from './components/ChatModal'
@@ -9,6 +13,9 @@ import {
   storeDocumentEmbeddings 
 } from './lib/embeddings'
 import DocumentQA from './components/DocumentQnA'
+import CurrentTab from './components/Sidebar/CurrentTab'
+import FootnotesTab from './components/Sidebar/FootnotesTab'
+import SearchTab from './components/Sidebar/SearchTab'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -948,26 +955,11 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen bg-gray-50">
-      {/* Notification Toast */}
-      {notification && (
-        <div 
-          className={`fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50 flex items-center backdrop-blur-sm ${
-            notification.type === 'error' ? 'bg-red-500/90' : 'bg-blue-500/90'
-          } text-white max-w-md transform transition-all duration-300 ease-out`}
-        >
-          <span className="flex-1 mr-2">{notification.message}</span>
-          <button 
-            onClick={() => setNotification(null)}
-            className="ml-2 text-white/80 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      )}
+      <Notification 
+        notification={notification} 
+        onClose={() => setNotification(null)} 
+      />
 
-      {/* Main Content Area */}
       <div className="flex-1 p-6 relative">
         {/* Header Section */}
         <div className="mb-6 flex items-center gap-4 flex-wrap">
@@ -1013,63 +1005,18 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Controls Bar */}
-        <div className="bg-white p-4 rounded-xl shadow-sm mb-6 flex flex-wrap items-center gap-4">
-          <select
-            value={targetLanguage}
-            onChange={handleLanguageChange}
-            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="de">German</option>
-            <option value="it">Italian</option>
-            <option value="pt">Portuguese</option>
-          </select>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={prevPage}
-              disabled={currentPage <= 1}
-              className="px-3 py-2 text-gray-500 hover:text-gray-700 disabled:opacity-30"
-            >
-              Previous
-            </button>
-            <span className="text-sm font-medium">
-              Page {currentPage} of {numPages}
-            </span>
-            <button
-              onClick={nextPage}
-              disabled={currentPage >= numPages}
-              className="px-3 py-2 text-gray-500 hover:text-gray-700 disabled:opacity-30"
-            >
-              Next
-            </button>
-          </div>
-
-          <select
-            value={scale}
-            onChange={(e) => setScale(Number(e.target.value))}
-            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value={1}>100%</option>
-            <option value={1.5}>150%</option>
-            <option value={2}>200%</option>
-            <option value={2.5}>250%</option>
-          </select>
-
-          <button
-            onClick={handleScreenshotAnalysis}
-            disabled={isAnalyzingImage}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-colors ${
-              isAnalyzingImage 
-              ? 'bg-purple-300 cursor-not-allowed' 
-              : 'bg-purple-600 hover:bg-purple-700 text-white shadow-sm'
-            }`}
-          >
-            {isAnalyzingImage ? 'Analyzing...' : 'Analyze View'}
-          </button>
-        </div>
+        <DocumentControls 
+          targetLanguage={targetLanguage}
+          handleLanguageChange={handleLanguageChange}
+          currentPage={currentPage}
+          numPages={numPages}
+          prevPage={prevPage}
+          nextPage={nextPage}
+          scale={scale}
+          setScale={setScale}
+          handleScreenshotAnalysis={handleScreenshotAnalysis}
+          isAnalyzingImage={isAnalyzingImage}
+        />
 
         {/* PDF Viewer */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
@@ -1078,204 +1025,80 @@ export default function Home() {
             <div
               ref={textLayerRef}
               className="absolute top-0 left-0 right-0 bottom-0 textLayer"
-              style={{ pointerEvents: 'none' }}
+              style={{ pointerEvents: 'all' }}
               onMouseUp={handleTextSelection}
               onMouseMove={handleTextHover}
               onMouseLeave={() => setShowFootnote(false)}
             />
             
-            {/* Selection Menu - Keep original functionality but update styling */}
             {showMenu && (
-              <div
-                ref={menuRef}
-                className="absolute bg-white shadow-lg rounded-lg p-2 z-50 transform -translate-x-1/2 flex gap-2"
-                style={{
-                  left: menuPosition.x,
-                  top: menuPosition.y - 40,
-                }}
-              >
-                <button
-                  onClick={handleTranslate}
-                  disabled={isTranslating}
-                  className={`px-3 py-1 text-sm rounded ${
-                    isTranslating
-                      ? 'bg-blue-300 cursor-not-allowed'
-                      : 'bg-blue-500 hover:bg-blue-600 text-white'
-                  }`}
-                >
-                  {isTranslating ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Translating...</span>
-                    </>
-                  ) : (
-                    'Translate'
-                  )}
-                </button>
-
-                <button
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing}
-                  className={`px-3 py-1 text-sm rounded ${
-                    isAnalyzing
-                      ? 'bg-green-300 cursor-not-allowed'
-                      : 'bg-green-500 hover:bg-green-600 text-white'
-                  }`}
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Analyzing...</span>
-                    </>
-                  ) : (
-                    'Analyze'
-                  )}
-                </button>
-
-                <button
-                  onClick={handleFootnoteButton}
-                  className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                >
-                  Footnote
-                </button>
-
-                <button
-                  onClick={handleSimilaritySearch}
-                  disabled={isSearchingSimilar}
-                  className={`px-3 py-1 text-sm rounded ${
-                    isSearchingSimilar
-                      ? 'bg-purple-300 cursor-not-allowed'
-                      : 'bg-purple-500 hover:bg-purple-600 text-white'
-                  }`}
-                >
-                  {isSearchingSimilar ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Searching...</span>
-                    </>
-                  ) : (
-                    'Find Similar'
-                  )}
-                </button>
-
-                <button
-                  onClick={handleSummarize}
-                  disabled={isSummarizing}
-                  className={`px-3 py-1 text-sm rounded ${
-                    isSummarizing
-                      ? 'bg-orange-300 cursor-not-allowed'
-                      : 'bg-orange-500 hover:bg-orange-600 text-white'
-                  }`}
-                >
-                  {isSummarizing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Summarizing...</span>
-                    </>
-                  ) : (
-                    'Summarize'
-                  )}
-                </button>
-              </div>
+              <SelectionMenu 
+                menuRef={menuRef}
+                menuPosition={menuPosition}
+                handleTranslate={handleTranslate}
+                isTranslating={isTranslating}
+                handleAnalyze={handleAnalyze}
+                isAnalyzing={isAnalyzing}
+                handleFootnoteButton={handleFootnoteButton}
+                handleSimilaritySearch={handleSimilaritySearch}
+                isSearchingSimilar={isSearchingSimilar}
+                handleSummarize={handleSummarize}
+                isSummarizing={isSummarizing}
+              />
             )}
           </div>
         </div>
       </div>
 
-      {/* Right Sidebar - Keep original structure but update styling */}
+      {/* Right Sidebar */}
       <div className="w-96 border-l border-gray-200 bg-white h-screen sticky top-0 overflow-y-auto">
         <div className="p-4">
-          {/* Tab Navigation */}
-          <div className="flex border-b border-gray-200">
-            {['Current', 'History', 'Footnotes', 'Search', 'Chat'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab.toLowerCase())}
-                className={`px-4 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.toLowerCase()
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          {/* Keep original tab content logic but add consistent styling */}
-          <div className="mt-4 space-y-4">
+          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+          
+          <div className="mt-4">
             {activeTab === 'current' && (
-              // ... (keep original current tab content with updated styling)
-              <div className="space-y-6">
-                {selectedText && (
-                  <>
-                    <div className="border-b pb-4">
-                      <h3 className="font-medium text-gray-900 mb-2">Selected Text:</h3>
-                      <p className="p-3 bg-gray-50 rounded-lg text-gray-600">{selectedText}</p>
-                    </div>
-
-                    {translatedText && (
-                      <div className="border-b pb-4">
-                        <h3 className="font-medium text-gray-900 mb-2">Translation:</h3>
-                        <p className="p-3 bg-gray-50 rounded-lg text-gray-600">{translatedText}</p>
-                      </div>
-                    )}
-
-                    {analysis && (
-                      <div className="border-b pb-4">
-                        <h3 className="font-medium text-gray-900 mb-2">Analysis:</h3>
-                        <div className="p-3 bg-gray-50 rounded-lg prose prose-sm">
-                          <p className="text-gray-600 whitespace-pre-line">{analysis}</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {summary && (
-                      <div className="border-b pb-4">
-                        <h3 className="font-medium text-gray-900 mb-2">Summary:</h3>
-                        <div className="p-3 bg-gray-50 rounded-lg prose prose-sm">
-                          <p className="text-gray-600 whitespace-pre-line">{summary}</p>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!selectedText && (
-                  <div className="text-gray-500 text-center py-8">
-                    Select text from the PDF to see translation and analysis
-                  </div>
-                )}
-              </div>
+              <CurrentTab
+                selectedText={selectedText}
+                translatedText={translatedText}
+                isTranslating={isTranslating}
+                analysis={analysis}
+                summary={summary}
+                imageAnalysis={imageAnalysis}
+                isAnalyzingImage={isAnalyzingImage}
+              />
             )}
 
-            {/* Keep other tab content with similar styling patterns */}
-            {activeTab === 'history' && <TranslationsCarousel translations={translationHistory} />}
-            {/* ... (keep other tab content) */}
+            {activeTab === 'history' && (
+              <TranslationsCarousel translations={translationHistory} />
+            )}
+
+            {activeTab === 'footnotes' && (
+              <FootnotesTab
+                footnotesHistory={footnotesHistory}
+                scrollToReference={scrollToReference}
+              />
+            )}
+
+            {activeTab === 'search' && (
+              <SearchTab
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                handleManualSearch={handleManualSearch}
+                isSearchingSimilar={isSearchingSimilar}
+                similarPassages={similarPassages}
+                setCurrentPage={setCurrentPage}
+              />
+            )}
+
+            {activeTab === 'chat' && (
+              <div className="p-4">
+                <h2 className="text-lg font-bold mb-2">Chat with PDF</h2>
+                {/* Chat content */}
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-      {/* Keep all existing modals and components */}
-      <ChatModal 
-        isOpen={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-        pdfName={currentDocument?.name || ''}
-        chatHistory={chatHistory}
-        chatInput={chatInput}
-        setChatInput={setChatInput}
-        handleChat={handleChat}
-        isChatLoading={isChatLoading}
-      />
-
-      <DocumentQA 
-        isOpen={isQAOpen}
-        onClose={() => setIsQAOpen(false)}
-        pageContent={currentPageContent}
-        documentName={currentDocument?.name || ''}
-        currentPage={currentPage}
-        pdfDoc={pdfDocRef.current}
-      />
 
       {/* Floating Action Buttons */}
       <div className="fixed bottom-6 right-6 flex flex-col gap-3">
@@ -1303,6 +1126,28 @@ export default function Home() {
           </svg>
         </button>
       </div>
+
+      {/* Chat Modal */}
+      <ChatModal 
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        pdfName={currentDocument?.name || ''}
+        chatHistory={chatHistory}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        handleChat={handleChat}
+        isChatLoading={isChatLoading}
+      />
+
+      {/* Document QA Modal */}
+      <DocumentQA 
+        isOpen={isQAOpen}
+        onClose={() => setIsQAOpen(false)}
+        pageContent={currentPageContent}
+        documentName={currentDocument?.name || ''}
+        currentPage={currentPage}
+        pdfDoc={pdfDocRef.current}
+      />
 
       {/* Loading States */}
       {isProcessingDocument && (
