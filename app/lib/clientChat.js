@@ -72,43 +72,46 @@ async function searchLocalVectors(query, options = {}) {
       }))
     })
 
-    // 3. Combine and Re-rank Results
+    // 3. Combine and Re-rank Results with proper normalization
     const combined = new Map()
 
-    // Add exact matches first with boosted scores (but normalized to 0-1 range)
+    // Add exact matches first with proper normalization
     exactMatches.forEach(match => {
       combined.set(match.text, {
         ...match,
-        similarity: Math.min(1.0, match.score * 1.2) // Cap at 1.0 and use lower boost
+        finalScore: Math.min(1.0, match.score), // Normalize to max 1.0 before boost
+        matchType: 'keyword'
       })
     })
 
-    // Add or update with semantic matches
+    // Add semantic matches (already normalized to 0-1 range)
     semanticResults.forEach(match => {
       if (combined.has(match.text)) {
-        // If exists, take the higher score but ensure it's normalized
+        // Take the higher score if exists in both
         const existing = combined.get(match.text)
-        existing.similarity = Math.min(1.0, Math.max(existing.similarity, match.similarity))
+        existing.finalScore = Math.min(1.0, Math.max(existing.finalScore, match.similarity))
       } else {
-        combined.set(match.text, match)
+        combined.set(match.text, {
+          ...match,
+          finalScore: Math.min(1.0, match.similarity),
+          matchType: 'semantic'
+        })
       }
     })
 
-    // Convert to array and sort by normalized scores
+    // Apply boosts after normalization
     const results = Array.from(combined.values())
       .map(result => ({
         ...result,
-        similarity: Math.min(1.0, result.similarity) // Ensure all scores are <= 1.0
+        finalScore: Math.min(1.0, result.finalScore * (result.matchType === 'keyword' ? 1.2 : 1.0))
       }))
-      .sort((a, b) => b.similarity - a.similarity)
+      .sort((a, b) => b.finalScore - a.finalScore)
 
-    console.log('Combined search results:', {
-      total: results.length,
-      topResults: results.slice(0, 3).map(r => ({
-        text: r.text.substring(0, 50),
-        score: (r.similarity * 100).toFixed(1) + '%'
-      }))
-    })
+    console.log('Combined results:', results.map(r => ({
+      text: r.text.substring(0, 50),
+      score: r.finalScore,
+      type: r.matchType
+    })))
 
     return results
   } catch (error) {
@@ -145,7 +148,7 @@ export async function handleClientChat(message) {
     const results = await searchLocalVectors(cleanQuery)
     console.log('Local search complete:', {
       resultsFound: results?.length || 0,
-      topScore: results[0]?.similarity || 0
+      topScore: results[0]?.finalScore || 0
     })
     
     if (!results || results.length === 0) {
@@ -157,7 +160,7 @@ export async function handleClientChat(message) {
     }
 
     // Filter by similarity threshold
-    const relevantResults = results.filter(r => r.similarity > 0.01)
+    const relevantResults = results.filter(r => r.finalScore > 0.01)
     
     if (relevantResults.length === 0) {
       console.log('No results above similarity threshold')
@@ -171,8 +174,9 @@ export async function handleClientChat(message) {
     const relevantContext = relevantResults.map(result => ({
       text: result.text, // Changed from result.metadata.text
       page: result.pageNumber, // Changed from result.metadata.pageNumber
-      score: result.similarity,
-      fileName: result.pdfName // Changed from result.metadata.pdfName
+      score: result.finalScore,
+      fileName: result.pdfName, // Changed from result.metadata.pdfName
+      matchType: result.matchType
     }))
 
     console.log('Processing local context:', {
@@ -193,30 +197,21 @@ export async function handleClientChat(message) {
 
       Context passages:
       ${relevantContext.map(r => `
-        [Source: ${r.fileName}, Page ${r.page}, Score: ${Math.min(100, (r.score * 100)).toFixed(1)}%]
+        [Source: ${r.fileName}, Page ${r.page}, Score: ${(r.finalScore * 100).toFixed(1)}%, Match Type: ${r.matchType}]
         "${r.text}"
       `).join('\n\n')}
 
       Instructions:
-      1. If you find a direct statement about the subject in a high-scoring passage (>70%), state that information clearly
-      2. Even if the information is brief, it is still valid information - don't say there is no information
-      3. Always cite your sources with page numbers
+      1. ALWAYS start with information from the highest scoring passage first (>70%)
+      2. If the highest scoring passage is a keyword match, prioritize that information
+      3. Include semantic matches only as supporting information
       4. Be direct and factual
       5. Don't contradict yourself or the source material
-      6. Prioritize information from passages with higher relevance scores
-      7. Consider semantic relationships and variations:
-         - Name variations (e.g., "Sam" vs "Samuel", "Mr. Walton" vs "Walton")
-         - Informal references (e.g., "the founder", "the businessman")
-         - Title variations (e.g., "CEO", "founder", "leader")
-         - Common misspellings or typos in names
-         - Relationship terms (e.g., "his wife" refers to "Helen Robson")
-      8. When answering:
-         - Use the person's full name at least once in the response
-         - Maintain consistent name usage throughout
-         - Include titles or roles when relevant
-         - Correct any name misspellings in the query while answering
-         - Connect family relationships when mentioned
-    `.trim()
+      6. When answering:
+         - Start with the most relevant information (highest score)
+         - Clearly indicate the source and score for key information
+         - Maintain proper context from the original passages
+      `.trim()
 
     // Get LLM response
     console.log('Getting LLM response...')

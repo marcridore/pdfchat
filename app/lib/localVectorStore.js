@@ -4,6 +4,20 @@ export const DB_NAME = 'vectorStore'
 export const DB_VERSION = 1
 export const METADATA_STORE = 'metadata'
 
+// Add BM25 parameters
+const BM25_PARAMS = {
+  k1: 1.2,  // Term frequency saturation parameter
+  b: 0.75,  // Length normalization parameter
+  avgDocLength: 0  // Will be calculated dynamically
+}
+
+// Add name-specific parameters
+const NAME_MATCH_PARAMS = {
+  similarityThreshold: 0.85,  // Higher threshold for names
+  exactMatchBoost: 2.5,      // Higher boost for exact matches
+  partialMatchPenalty: 0.7   // Penalize partial matches more
+}
+
 class LocalVectorStore {
   constructor() {
     this.db = null
@@ -413,37 +427,49 @@ class LocalVectorStore {
           const vectors = request.result
           const queryTerms = query.toLowerCase().split(/\s+/)
           
+          // Calculate average document length for BM25
+          const totalLength = vectors.reduce((sum, doc) => 
+            sum + doc.metadata.text.split(/\s+/).length, 0)
+          BM25_PARAMS.avgDocLength = totalLength / vectors.length
+
           const results = vectors
             .map(item => {
               const text = item.metadata.text.toLowerCase()
-              let score = 0
+              const docTerms = text.split(/\s+/)
+              let bm25Score = 0
               let maxWordScore = 0
 
-              // Split text into words for word-level matching
-              const words = text.split(/\s+/)
-              
-              queryTerms.forEach(term => {
-                words.forEach(word => {
-                  const similarity = calculateStringSimilarity(term, word)
-                  if (similarity > 0.7) { // Lower threshold for fuzzy matches
-                    const wordScore = similarity * (
-                      word === term ? 2.0 : // Exact match
-                      similarity > 0.9 ? 1.5 : // Very close match
-                      1.0 // Fuzzy match
-                    )
-                    maxWordScore = Math.max(maxWordScore, wordScore)
+              // Calculate document frequency for each term
+              const termFreqs = new Map()
+              docTerms.forEach(term => {
+                termFreqs.set(term, (termFreqs.get(term) || 0) + 1)
+              })
+
+              queryTerms.forEach(queryTerm => {
+                // BM25 scoring
+                docTerms.forEach(docTerm => {
+                  const similarity = calculateStringSimilarity(queryTerm, docTerm)
+                  if (similarity > 0.7) {
+                    const tf = termFreqs.get(docTerm) || 0
+                    const docLength = docTerms.length
+                    
+                    // BM25 formula
+                    const numerator = tf * (BM25_PARAMS.k1 + 1)
+                    const denominator = tf + BM25_PARAMS.k1 * (1 - BM25_PARAMS.b + BM25_PARAMS.b * docLength / BM25_PARAMS.avgDocLength)
+                    const score = similarity * (numerator / denominator)
+                    
+                    bm25Score += score
+                    maxWordScore = Math.max(maxWordScore, score)
                   }
                 })
               })
-
-              // Use the highest word match score
-              score = maxWordScore
 
               return {
                 ...item.metadata,
                 id: item.id,
                 text: item.metadata.text,
-                score: score
+                score: bm25Score,
+                exactMatchScore: maxWordScore
               }
             })
             .filter(item => item.score > 0)
@@ -572,6 +598,12 @@ function getTypoCost(char1, char2) {
   }
 
   return 1
+}
+
+// Helper function to detect likely names
+function isLikelyName(term) {
+  return /^[A-Z][a-z]+$/.test(term) || // Capitalized word
+         term.split(/\s+/).length > 1   // Multiple words
 }
 
 // Create and export a singleton instance
