@@ -1,4 +1,5 @@
 import { clientLocalStore } from './clientLocalStore'
+import { TFIDF_PARAMS } from './localVectorStore'
 
 async function getEmbedding(text) {
   // Normalize text before getting embedding
@@ -52,15 +53,13 @@ async function searchLocalVectors(query, options = {}) {
   try {
     console.log('Starting hybrid search for:', query)
     
-    // 1. Exact/Keyword Match with higher weight
-    const exactMatches = await clientLocalStore.searchByKeyword(query)
-    console.log('Keyword matches:', {
-      count: exactMatches.length,
-      matches: exactMatches.map(m => ({
-        text: m.text.substring(0, 50),
-        score: m.score
-      }))
-    })
+    // 1. TF-IDF based keyword search
+    const keywordResults = await clientLocalStore.searchByKeyword(query)
+    console.log('TF-IDF matches:', keywordResults.map(m => ({
+      text: m.text.substring(0, 50),
+      score: m.score,
+      exactMatch: m.exactMatchScore
+    })))
 
     // 2. Semantic Search
     const semanticResults = await clientLocalStore.searchSimilar(query, 5, 0.1)
@@ -72,42 +71,43 @@ async function searchLocalVectors(query, options = {}) {
       }))
     })
 
-    // 3. Combine and Re-rank Results with proper normalization
+    // 3. Combine and Re-rank with weighted scores
     const combined = new Map()
 
-    // Add exact matches first with proper normalization
-    exactMatches.forEach(match => {
+    // Add TF-IDF matches
+    keywordResults.forEach(match => {
       combined.set(match.text, {
         ...match,
-        finalScore: Math.min(1.0, match.score), // Normalize to max 1.0 before boost
-        matchType: 'keyword'
+        finalScore: match.exactMatchScore > 0.8 ? 
+          match.score * TFIDF_PARAMS.keywordWeight : // Full weight for good matches
+          match.score * TFIDF_PARAMS.keywordWeight * 0.5, // Half weight for fuzzy matches
+        matchType: 'keyword',
+        originalScore: match.score,
+        exactMatch: match.exactMatchScore
       })
     })
 
-    // Add semantic matches (already normalized to 0-1 range)
+    // Add semantic matches with weighted scores
     semanticResults.forEach(match => {
       if (combined.has(match.text)) {
-        // Take the higher score if exists in both
+        // Combine scores if exists in both
         const existing = combined.get(match.text)
-        existing.finalScore = Math.min(1.0, Math.max(existing.finalScore, match.similarity))
+        const semanticScore = match.similarity * TFIDF_PARAMS.semanticWeight
+        existing.finalScore = Math.min(1.0, existing.finalScore + semanticScore)
       } else {
         combined.set(match.text, {
           ...match,
-          finalScore: Math.min(1.0, match.similarity),
+          finalScore: match.similarity * TFIDF_PARAMS.semanticWeight,
           matchType: 'semantic'
         })
       }
     })
 
-    // Apply boosts after normalization
+    // Sort by combined scores
     const results = Array.from(combined.values())
-      .map(result => ({
-        ...result,
-        finalScore: Math.min(1.0, result.finalScore * (result.matchType === 'keyword' ? 1.2 : 1.0))
-      }))
       .sort((a, b) => b.finalScore - a.finalScore)
 
-    console.log('Combined results:', results.map(r => ({
+    console.log('Hybrid search results:', results.map(r => ({
       text: r.text.substring(0, 50),
       score: r.finalScore,
       type: r.matchType
@@ -170,14 +170,27 @@ export async function handleClientChat(message) {
       }
     }
 
-    // Map results to context format - note the change in accessing text property
-    const relevantContext = relevantResults.map(result => ({
-      text: result.text, // Changed from result.metadata.text
-      page: result.pageNumber, // Changed from result.metadata.pageNumber
-      score: result.finalScore,
-      fileName: result.pdfName, // Changed from result.metadata.pdfName
-      matchType: result.matchType
-    }))
+    // Map results to context format with proper score handling
+    const relevantContext = relevantResults.map(result => {
+      // Ensure score is a valid number
+      const score = typeof result.finalScore === 'number' && !isNaN(result.finalScore) 
+        ? result.finalScore 
+        : result.score || result.similarity || 0
+
+      return {
+        text: result.text,
+        page: result.pageNumber,
+        score: Math.min(1.0, Math.max(0, score)), // Clamp between 0 and 1
+        fileName: result.pdfName,
+        matchType: result.matchType
+      }
+    })
+
+    // Debug scores
+    console.log('Context scores:', relevantContext.map(c => ({
+      score: c.score,
+      text: c.text.substring(0, 50)
+    })))
 
     console.log('Processing local context:', {
       contextCount: relevantContext.length,
@@ -197,20 +210,24 @@ export async function handleClientChat(message) {
 
       Context passages:
       ${relevantContext.map(r => `
-        [Source: ${r.fileName}, Page ${r.page}, Score: ${(r.finalScore * 100).toFixed(1)}%, Match Type: ${r.matchType}]
+        [Source: ${r.fileName}, Page ${r.page}, Score: ${(r.score * 100).toFixed(1)}%, Match Type: ${r.matchType}]
         "${r.text}"
       `).join('\n\n')}
 
       Instructions:
       1. ALWAYS start with information from the highest scoring passage first (>70%)
-      2. If the highest scoring passage is a keyword match, prioritize that information
+      2. For name-related queries:
+         - If the query appears to be a misspelled name, mention the correct spelling first
+         - Example: "You asked about 'morc rudore' - the correct name is 'Marc Ridore'"
+         - Then provide the available information about that person
       3. Include semantic matches only as supporting information
       4. Be direct and factual
-      5. Don't contradict yourself or the source material
+      5. Don't mention NaN or undefined scores in the response
       6. When answering:
-         - Start with the most relevant information (highest score)
-         - Clearly indicate the source and score for key information
+         - Start with name correction if applicable
+         - Then provide the most relevant information
          - Maintain proper context from the original passages
+         - Use proper capitalization for names
       `.trim()
 
     // Get LLM response

@@ -18,6 +18,13 @@ const NAME_MATCH_PARAMS = {
   partialMatchPenalty: 0.7   // Penalize partial matches more
 }
 
+// Add TF-IDF constants and helpers
+export const TFIDF_PARAMS = {
+  keywordWeight: 0.6,
+  semanticWeight: 0.4,
+  minScore: 0.1
+}
+
 class LocalVectorStore {
   constructor() {
     this.db = null
@@ -416,6 +423,7 @@ class LocalVectorStore {
 
   async searchByKeyword(query, limit = 5) {
     await this.initPromise
+    const idf = await this.calculateIDF()
     
     return new Promise((resolve, reject) => {
       try {
@@ -427,52 +435,51 @@ class LocalVectorStore {
           const vectors = request.result
           const queryTerms = query.toLowerCase().split(/\s+/)
           
-          // Calculate average document length for BM25
-          const totalLength = vectors.reduce((sum, doc) => 
-            sum + doc.metadata.text.split(/\s+/).length, 0)
-          BM25_PARAMS.avgDocLength = totalLength / vectors.length
-
           const results = vectors
             .map(item => {
               const text = item.metadata.text.toLowerCase()
-              const docTerms = text.split(/\s+/)
-              let bm25Score = 0
-              let maxWordScore = 0
-
-              // Calculate document frequency for each term
+              const terms = text.split(/\s+/)
               const termFreqs = new Map()
-              docTerms.forEach(term => {
+              
+              // Calculate term frequencies
+              terms.forEach(term => {
                 termFreqs.set(term, (termFreqs.get(term) || 0) + 1)
               })
 
+              // Calculate TF-IDF score
+              let tfidfScore = 0
+              let maxSimilarity = 0
               queryTerms.forEach(queryTerm => {
-                // BM25 scoring
-                docTerms.forEach(docTerm => {
-                  const similarity = calculateStringSimilarity(queryTerm, docTerm)
+                terms.forEach(term => {
+                  const similarity = calculateStringSimilarity(queryTerm, term)
                   if (similarity > 0.7) {
-                    const tf = termFreqs.get(docTerm) || 0
-                    const docLength = docTerms.length
-                    
-                    // BM25 formula
-                    const numerator = tf * (BM25_PARAMS.k1 + 1)
-                    const denominator = tf + BM25_PARAMS.k1 * (1 - BM25_PARAMS.b + BM25_PARAMS.b * docLength / BM25_PARAMS.avgDocLength)
-                    const score = similarity * (numerator / denominator)
-                    
-                    bm25Score += score
-                    maxWordScore = Math.max(maxWordScore, score)
+                    const tf = termFreqs.get(term) || 0
+                    const idfScore = idf.get(term) || 0
+                    tfidfScore += similarity * tf * idfScore
+                    maxSimilarity = Math.max(maxSimilarity, similarity)
                   }
                 })
               })
+
+              // Prevent division by zero and NaN
+              const maxPossibleScore = Math.max(
+                queryTerms.length * Math.max(...Array.from(idf.values() || [0])), 
+                0.0001
+              )
+              
+              // Normalize score to 0-1 range
+              const normalizedScore = Math.min(1.0, Math.max(0, tfidfScore / maxPossibleScore))
 
               return {
                 ...item.metadata,
                 id: item.id,
                 text: item.metadata.text,
-                score: bm25Score,
-                exactMatchScore: maxWordScore
+                score: normalizedScore,
+                exactMatchScore: maxSimilarity,
+                matchType: 'keyword'
               }
             })
-            .filter(item => item.score > 0)
+            .filter(item => item.score > TFIDF_PARAMS.minScore)
             .sort((a, b) => b.score - a.score)
             .slice(0, limit)
 
@@ -519,6 +526,56 @@ class LocalVectorStore {
       console.error('Error in checkPageExists:', error)
       throw error
     }
+  }
+
+  async calculateIDF() {
+    const vectors = await this.getAllVectors()
+    const termFrequencies = new Map()
+    const totalDocs = vectors.length
+
+    // Calculate document frequencies
+    vectors.forEach(doc => {
+      const terms = new Set(doc.metadata.text.toLowerCase().split(/\s+/))
+      terms.forEach(term => {
+        termFrequencies.set(term, (termFrequencies.get(term) || 0) + 1)
+      })
+    })
+
+    // Calculate IDF for each term
+    const idf = new Map()
+    termFrequencies.forEach((freq, term) => {
+      idf.set(term, Math.log(totalDocs / freq))
+    })
+
+    return idf
+  }
+
+  async getAllVectors() {
+    await this.initPromise
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+        const store = transaction.objectStore(VECTOR_STORE)
+        const request = store.getAll()
+
+        request.onsuccess = () => {
+          const vectors = request.result
+          console.log('Retrieved all vectors:', {
+            count: vectors.length
+          })
+          resolve(vectors)
+        }
+
+        request.onerror = (event) => {
+          console.error('Error getting all vectors:', event.target.error)
+          reject(event.target.error)
+        }
+      } catch (error) {
+        console.error('Error in getAllVectors:', error)
+        reject(error)
+      }
+    })
   }
 }
 
