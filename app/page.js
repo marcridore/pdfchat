@@ -8,16 +8,18 @@ import Notification from './components/LoadingStates/Notification'
 import TranslationsCarousel from './components/TranslationsCarousel'
 import Tooltip from './components/Tooltip'
 import ChatModal from './components/ChatModal'
-import { 
-  storePageEmbeddings, 
-  storeDocumentEmbeddings 
-} from './lib/embeddings'
+// import { storePageEmbeddings } from './lib/embeddings'
 import DocumentQA from './components/DocumentQnA'
 import CurrentTab from './components/Sidebar/CurrentTab'
 import FootnotesTab from './components/Sidebar/FootnotesTab'
 import SearchTab from './components/Sidebar/SearchTab'
 import Sidebar from './components/Sidebar/Sidebar'
 import UserGuide from './components/PDFViewer/UserGuide'
+import { localVectorStore } from './lib/localVectorStore'
+import { VECTOR_STORE } from './lib/localVectorStore'
+import { handleLocalChat } from './lib/localChat'
+import { clientLocalStore } from './lib/clientLocalStore'
+import { handleClientChat } from './lib/clientChat'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -64,6 +66,9 @@ export default function Home() {
   const [currentPageContent, setCurrentPageContent] = useState('')
   const [isPdfLoading, setIsPdfLoading] = useState(false)
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
+  const [useLocalVectorization, setUseLocalVectorization] = useState(false)
+  const [isStoragePreferenceLoaded, setIsStoragePreferenceLoaded] = useState(false)
+  const [isLocalStoreReady, setIsLocalStoreReady] = useState(false)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -83,6 +88,16 @@ export default function Home() {
       console.error('Error loading processed documents:', error)
     }
   }, []) // Empty dependency array means this runs once after mount
+
+  // Add effect to load storage preference
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('useLocalVectorization')
+      const value = stored ? JSON.parse(stored) : false
+      setUseLocalVectorization(value)
+      setIsStoragePreferenceLoaded(true)
+    }
+  }, [])
 
   // Load PDF document
   const loadPDF = async (file, doc = null) => {
@@ -125,11 +140,16 @@ export default function Home() {
       // Process pages in background
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
-        await processPage(page, activeDoc)
+        await processPage(page, activeDoc, useLocalVectorization)
         setProcessingProgress(prev => ({ 
           ...prev, 
           current: pageNum 
         }))
+      }
+
+      if (useLocalVectorization) {
+        console.log('Checking final database state...')
+        await localVectorStore.checkDatabaseContents()
       }
 
       setIsProcessingDocument(false)
@@ -249,39 +269,47 @@ export default function Home() {
     if (file && file.type === 'application/pdf') {
       console.log('Uploading new document:', {
         fileName: file.name,
-        timestamp: Date.now()
+        useLocalStorage: useLocalVectorization // Log storage choice
       })
 
       // Create new document object
       const newDoc = {
         id: Date.now(),
         name: file.name,
-        currentPage: 1,
-        scale: 1.5,
-        footnotesHistory: {},
-        footnoteCounter: 1,
-        isNewDocument: true,
-        file: file
+        file: file,
+        timestamp: Date.now()
       }
 
-      // Update state
-      const updatedDocuments = [...documents, newDoc]
-      setDocuments(updatedDocuments)
-      
-      // Store document metadata in localStorage
-      const docForStorage = { ...newDoc }
-      delete docForStorage.file
-      localStorage.setItem('pdfDocuments', JSON.stringify(updatedDocuments.map(d => {
-        const docCopy = { ...d }
-        delete docCopy.file
-        return docCopy
-      })))
-
+      // Add to documents list
+      setDocuments(prev => [...prev, newDoc])
       setCurrentDocument(newDoc)
-      setPdfFile(file)
-      
-      // Process the PDF
+
+      // Reset states
+      setSelectedText('')
+      setTranslatedText('')
+      setAnalysis('')
+      setSummary('')
+      setImageAnalysis('')
+      setTranslationHistory([])
+      setFootnotesHistory({})
+      setFootnoteCounter(1)
+      setSimilarPassages([])
+      setSearchQuery('')
+      setChatHistory([])
+      setActiveTab('current')
+
+      // Load PDF
       await loadPDF(file, newDoc)
+
+      // Clear file input
+      if (event.target) {
+        event.target.value = ''
+      }
+    } else {
+      setNotification({
+        type: 'error',
+        message: 'Please upload a PDF file'
+      })
     }
   }
 
@@ -761,25 +789,41 @@ export default function Home() {
     
     setIsSearchingSimilar(true)
     try {
-      const response = await fetch('/api/similar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: selectedText,
-        }),
-      })
+      if (useLocalVectorization) {
+        // Get embedding for selected text
+        const response = await fetch('/api/local-embedding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: selectedText })
+        })
 
-      if (!response.ok) throw new Error('Failed to search similar passages')
-
-      const { similar } = await response.json()
-      setSimilarPassages(similar)
+        const { embedding } = await response.json()
+        
+        // Search in local store
+        const results = await localVectorStore.findSimilar(embedding, 5, {
+          documentId: currentDocument.id // Exclude current document
+        })
+        
+        setSimilarPassages(results)
+      } else {
+        // Existing Pinecone search flow
+        const response = await fetch('/api/similar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: selectedText })
+        })
+        const data = await response.json()
+        setSimilarPassages(data)
+      }
+      setActiveTab('search')
     } catch (error) {
-      // console.error('Similar search error:', error)
+      console.error('Error searching similar passages:', error)
+      setNotification({
+        type: 'error',
+        message: 'Failed to search similar passages'
+      })
     } finally {
       setIsSearchingSimilar(false)
-      setShowMenu(false)
     }
   }
 
@@ -811,104 +855,161 @@ export default function Home() {
   }
 
   // Add chat handler
-  const handleChat = async () => {
-    if (!chatInput.trim()) return
+  const handleChat = async (input = chatInput) => {
+    const message = input || chatInput
+    if (!message || !message.trim()) return
 
-    const userMessage = { role: 'user', content: chatInput }
-    
-    // Update chat immediately with user message
-    setChatHistory(prev => [...prev, userMessage])
-    setChatInput('')
     setIsChatLoading(true)
+    const newMessage = { role: 'user', content: message }
+    const updatedHistory = [...chatHistory, newMessage]
+    setChatHistory(updatedHistory)
+    setChatInput('')
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: chatInput,
-          documentName: currentDocument?.name
+      let response
+      const storageType = useLocalVectorization ? 'local' : 'remote'
+      console.log(`Using ${storageType} storage for chat...`)
+
+      if (useLocalVectorization) {
+        // Check if local store is ready
+        if (!clientLocalStore.isReady()) {
+          console.log('Local store not ready, initializing...')
+          await clientLocalStore.init()
+        }
+
+        // Handle chat entirely on client side - pass only current message
+        console.log('Processing chat with local vectors...')
+        try {
+          const result = await handleClientChat(message)
+          response = {
+            ok: true,
+            data: result
+          }
+        } catch (error) {
+          console.error('Local chat failed:', error)
+          setNotification({
+            type: 'error',
+            message: 'Local chat failed. Please try again or switch to remote storage.'
+          })
+          throw error
+        }
+      } else {
+        // Use remote API - pass full history
+        console.log('Processing chat with Pinecone...')
+        response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: updatedHistory
+          })
         })
+        response.data = await response.json()
+      }
+
+      if (!response.ok) {
+        throw new Error(response.data.error || 'Chat request failed')
+      }
+
+      console.log(`${storageType} chat completed:`, {
+        contextFound: response.data.context?.length || 0
       })
 
-      const data = await response.json()
-      
-      if (response.ok) {
-        // Create the assistant message with both response and context
-        const assistantMessage = {
-          role: 'assistant',
-          content: data.response,    // This is the LLM's response text
-          context: data.context      // This is the reference material
-        }
-        
-        // Add the complete message to chat history
-        setChatHistory(prev => [...prev, assistantMessage])
-      } else {
-        throw new Error(data.error || 'Failed to get response')
-      }
+      setChatHistory([...updatedHistory, { 
+        role: 'assistant', 
+        content: response.data.response,
+        context: response.data.context
+      }])
     } catch (error) {
       console.error('Chat error:', error)
-      setChatHistory(prev => [...prev, {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error processing your request.'
-      }])
+      setNotification({
+        type: 'error',
+        message: error.message || 'Failed to get chat response'
+      })
+      // Remove the failed message from history
+      setChatHistory(updatedHistory.slice(0, -1))
     } finally {
       setIsChatLoading(false)
     }
   }
 
   // Update processPage function
-  const processPage = async (page, doc) => {
+  const processPage = async (page, doc, useLocal) => {
     try {
       const textContent = await page.getTextContent()
-      const pageText = textContent.items.map(item => item.str).join(' ')
-      
+      const text = textContent.items.map(item => item.str).join(' ')
+
       console.log('Processing page:', {
-        pageNumber: page._pageIndex + 1,
-        documentId: doc.id,
-        textLength: pageText.length
+        storage: useLocal ? 'local' : 'pinecone',
+        page: page.pageNumber,
+        docName: doc.name
       })
 
-      // Use the API endpoint for both checking and storing
+      if (useLocal) {
+        // Local storage path
+        const response = await fetch('/api/local-embedding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to create local embedding')
+        }
+
+        const { embedding } = await response.json()
+        
+        // Store in IndexedDB
+        const vectorId = `${doc.id}-${page.pageNumber}-${Date.now()}`
+        await localVectorStore.storeVector(
+          vectorId,
+          embedding,
+          {
+            documentId: doc.id,
+            pageNumber: page.pageNumber,
+            pdfName: doc.name,
+            text
+          }
+        )
+
+        console.log('Stored in local IndexedDB:', {
+          page: page.pageNumber,
+          docName: doc.name,
+          vectorId
+        })
+
+        return // Exit early for local storage path
+      }
+
+      // Pinecone storage path
       const response = await fetch('/api/similar', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: pageText,
+          text,
           metadata: {
             documentId: doc.id,
-            pageNumber: page._pageIndex + 1,
+            pageNumber: page.pageNumber,
             pdfName: doc.name
           }
         })
       })
 
       if (!response.ok) {
-        throw new Error('Failed to process page')
+        throw new Error('Failed to store in Pinecone')
       }
 
-      const result = await response.json()
-      
-      if (result.exists) {
-        console.log('Page already exists:', {
-          documentId: doc.id,
-          pageNumber: page._pageIndex + 1
-        })
-      } else {
-        console.log('Page processed successfully:', {
-          documentId: doc.id,
-          pageNumber: page._pageIndex + 1
-        })
-      }
+      // Update progress
+      setProcessingProgress(prev => ({
+        ...prev,
+        current: page.pageNumber
+      }))
 
     } catch (error) {
-      console.error('Error processing page:', {
-        pageNumber: page._pageIndex + 1,
-        error: error.message
+      console.error('Error processing page:', error)
+      setNotification({
+        type: 'error',
+        message: `Failed to process page ${page.pageNumber}`
       })
-      throw error
     }
   }
 
@@ -962,6 +1063,58 @@ export default function Home() {
       console.log('Cleared processed documents state')
     }
   }
+
+  // Add handler for setting change
+  const handleVectorizationSettingChange = (useLocal) => {
+    setUseLocalVectorization(useLocal)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('useLocalVectorization', JSON.stringify(useLocal))
+      console.log('Storage preference updated:', useLocal ? 'local' : 'remote')
+    }
+  }
+
+  // Update the initialization effect
+  useEffect(() => {
+    const initStore = async () => {
+      if (!isStoragePreferenceLoaded) return;
+
+      try {
+        if (useLocalVectorization) {
+          console.log('Initializing local store...')
+          await clientLocalStore.init()
+          setIsLocalStoreReady(true)
+          console.log('Local store initialization complete')
+        }
+      } catch (error) {
+        console.error('Failed to initialize local store:', error)
+        setNotification({
+          type: 'error',
+          message: 'Failed to initialize storage system'
+        })
+      }
+    }
+
+    initStore()
+  }, [useLocalVectorization, isStoragePreferenceLoaded])
+
+  // Update the storage preference effect
+  useEffect(() => {
+    if (!useLocalVectorization) {
+      console.log('Using remote storage')
+      return
+    }
+
+    if (!isLocalStoreReady) {
+      console.log('Local store not ready, initializing...')
+      clientLocalStore.init().catch(error => {
+        console.error('Failed to initialize local store:', error)
+        setNotification({
+          type: 'error',
+          message: 'Failed to initialize local storage'
+        })
+      })
+    }
+  }, [useLocalVectorization, isLocalStoreReady])
 
   return (
     <main className="flex min-h-screen bg-gray-50">
@@ -1027,6 +1180,8 @@ export default function Home() {
           setScale={setScale}
           handleScreenshotAnalysis={handleScreenshotAnalysis}
           isAnalyzingImage={isAnalyzingImage}
+          onVectorizationSettingChange={handleVectorizationSettingChange}
+          setNotification={setNotification}
         />
 
         {/* PDF Viewer Container with Processing Indicator */}
@@ -1175,7 +1330,7 @@ export default function Home() {
         chatHistory={chatHistory}
         chatInput={chatInput}
         setChatInput={setChatInput}
-        handleChat={handleChat}
+        handleChat={() => handleChat()} // Call without arguments to use chatInput state
         isChatLoading={isChatLoading}
       />
 

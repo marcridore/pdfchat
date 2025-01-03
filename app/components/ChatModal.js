@@ -14,6 +14,13 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
     if (isOpen) inputRef.current?.focus()
   }, [isOpen])
 
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (chatInput.trim()) {
+      handleChat()
+    }
+  }
+
   return (
     <div className={`fixed inset-0 ${isOpen ? 'flex' : 'hidden'} items-center justify-center z-50`}>
       {/* Backdrop with modern blur effect */}
@@ -167,7 +174,7 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
               )}
             </div>
             <button
-              onClick={handleChat}
+              onClick={handleSubmit}
               disabled={isChatLoading || !chatInput.trim()}
               className="px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
                 text-white rounded-xl font-medium flex items-center space-x-2

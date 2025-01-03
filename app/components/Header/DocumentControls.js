@@ -1,3 +1,5 @@
+import VectorizationSettings from '../VectorizationSettings'
+
 export default function DocumentControls({ 
   targetLanguage, 
   handleLanguageChange, 
@@ -8,7 +10,9 @@ export default function DocumentControls({
   scale, 
   setScale, 
   handleScreenshotAnalysis, 
-  isAnalyzingImage 
+  isAnalyzingImage, 
+  onVectorizationSettingChange,
+  setNotification 
 }) {
   return (
     <div className="bg-white p-4 rounded-xl shadow-sm mb-6 flex flex-wrap items-center gap-4">
@@ -66,6 +70,11 @@ export default function DocumentControls({
       >
         {isAnalyzingImage ? 'Analyzing...' : 'Analyze View'}
       </button>
+
+      <VectorizationSettings 
+        onSettingChange={onVectorizationSettingChange}
+        setNotification={setNotification}
+      />
     </div>
   )
 } 

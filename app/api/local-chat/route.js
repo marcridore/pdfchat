@@ -1,31 +1,31 @@
 import { NextResponse } from 'next/server'
-import { findSimilar } from '@/app/lib/embeddings'
+import { localVectorStore } from '../../lib/localVectorStore'
 
 export async function POST(req) {
   try {
     const { messages } = await req.json()
     const userMessage = messages[messages.length - 1]
 
-    console.log('Server chat API received request:', {
+    console.log('Local Chat API received request:', {
       messageCount: messages.length,
       lastMessage: userMessage.content.substring(0, 50) + '...'
     })
 
-    // Get relevant context from Pinecone
+    // Get relevant context from local vector store
     let relevantContext = []
     try {
-      console.log('Searching Pinecone for context...')
-      const results = await findSimilar(userMessage.content, 3)
+      const results = await localVectorStore.searchSimilar(userMessage.content, 3)
       relevantContext = results.map(result => ({
         text: result.metadata.text,
         page: result.metadata.pageNumber,
-        score: result.score,
+        score: result.similarity,
         fileName: result.metadata.pdfName
       }))
+      console.log('Found local context:', relevantContext.length, 'results')
     } catch (error) {
-      console.error('Error searching Pinecone:', error)
+      console.error('Error searching local vectors:', error)
       return NextResponse.json({ 
-        error: 'Failed to search Pinecone' 
+        error: 'Failed to search local vectors' 
       }, { status: 500 })
     }
 
@@ -84,7 +84,7 @@ export async function POST(req) {
     }
 
   } catch (error) {
-    console.error('Server chat error:', error)
+    console.error('Local Chat API error:', error)
     return NextResponse.json({ 
       error: error.message || 'Failed to process chat' 
     }, { status: 500 })
