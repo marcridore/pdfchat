@@ -8,7 +8,6 @@ import Notification from './components/LoadingStates/Notification'
 import TranslationsCarousel from './components/TranslationsCarousel'
 import Tooltip from './components/Tooltip'
 import ChatModal from './components/ChatModal'
-// import { storePageEmbeddings } from './lib/embeddings'
 import DocumentQA from './components/DocumentQnA'
 import CurrentTab from './components/Sidebar/CurrentTab'
 import FootnotesTab from './components/Sidebar/FootnotesTab'
@@ -20,6 +19,8 @@ import { VECTOR_STORE } from './lib/localVectorStore'
 import { handleLocalChat } from './lib/localChat'
 import { clientLocalStore } from './lib/clientLocalStore'
 import { handleClientChat } from './lib/clientChat'
+import { storePageEmbeddings } from './lib/embeddings'
+import { checkDocumentExistsInPinecone } from './lib/embeddings'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -133,11 +134,70 @@ export default function Home() {
       await renderPage(1, activeDoc)
       setIsPdfLoading(false)
 
+      // Check if document is already processed in either store
+      const docKey = `${activeDoc.name}-${activeDoc.id}`
+      if (processedDocuments[docKey]) {
+        console.log('Document already processed in state:', docKey)
+        setNotification({
+          type: 'info',
+          message: `Document "${activeDoc.name}" has already been processed and is ready for querying.`,
+          duration: 5000
+        })
+        return
+      }
+
+      if (useLocalVectorization) {
+        const exists = await clientLocalStore.checkDocumentExists(activeDoc.name)
+        if (exists) {
+          console.log('Document already exists in local store:', activeDoc.name)
+          // Update processed documents state
+          const updatedProcessed = {
+            ...processedDocuments,
+            [docKey]: {
+              timestamp: Date.now(),
+              pageCount: pdf.numPages
+            }
+          }
+          setProcessedDocuments(updatedProcessed)
+          localStorage.setItem('processedDocuments', JSON.stringify(updatedProcessed))
+          
+          setNotification({
+            type: 'info',
+            message: `Document "${activeDoc.name}" already exists in the local database and is ready for querying.`,
+            duration: 5000
+          })
+          return
+        }
+      } else {
+        // Check Pinecone if not using local vectorization
+        const exists = await checkDocumentExistsInPinecone(activeDoc.name)
+        if (exists) {
+          console.log('Document already exists in Pinecone:', activeDoc.name)
+          // Update processed documents state
+          const updatedProcessed = {
+            ...processedDocuments,
+            [docKey]: {
+              timestamp: Date.now(),
+              pageCount: pdf.numPages
+            }
+          }
+          setProcessedDocuments(updatedProcessed)
+          localStorage.setItem('processedDocuments', JSON.stringify(updatedProcessed))
+          
+          setNotification({
+            type: 'info',
+            message: `Document "${activeDoc.name}" already exists in Pinecone and is ready for querying.`,
+            duration: 5000
+          })
+          return
+        }
+      }
+
       // Start processing pages in background
       setIsProcessingDocument(true)
       setProcessingProgress({ current: 0, total: pdf.numPages })
       
-      // Process pages in background
+      // Process all pages
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
         await processPage(page, activeDoc, useLocalVectorization)
@@ -147,23 +207,29 @@ export default function Home() {
         }))
       }
 
-      if (useLocalVectorization) {
-        console.log('Checking final database state...')
-        await localVectorStore.checkDatabaseContents()
+      // Mark document as processed
+      const updatedProcessed = {
+        ...processedDocuments,
+        [docKey]: {
+          timestamp: Date.now(),
+          pageCount: pdf.numPages
+        }
       }
+      setProcessedDocuments(updatedProcessed)
+      localStorage.setItem('processedDocuments', JSON.stringify(updatedProcessed))
+      console.log('Document processing complete:', docKey)
 
       setIsProcessingDocument(false)
       setProcessingProgress({ current: 0, total: 0 })
 
     } catch (error) {
       console.error('Error loading PDF:', error)
-      setIsPdfLoading(false)
-      setIsProcessingDocument(false)
-      setProcessingProgress({ current: 0, total: 0 })
       setNotification({
         type: 'error',
-        message: 'Failed to load PDF'
+        message: 'Failed to load PDF file'
       })
+      setIsPdfLoading(false)
+      setIsProcessingDocument(false)
     }
   }
 
@@ -933,83 +999,66 @@ export default function Home() {
   }
 
   // Update processPage function
-  const processPage = async (page, doc, useLocal) => {
+  const processPage = async (page, doc, useLocal = false) => {
+    if (!doc) return
+
+    const docKey = `${doc.name}-${doc.id}`
+    const pageNum = page.pageNumber
+
+    // Check if this specific page of the document has been processed
+    if (processedDocuments[docKey]?.pages?.[pageNum]) {
+      console.log(`Page ${pageNum} of ${docKey} already processed, skipping...`)
+      return
+    }
+
     try {
       const textContent = await page.getTextContent()
-      const text = textContent.items.map(item => item.str).join(' ')
+      const pageText = textContent.items
+        .map(item => item.str)
+        .join(' ')
+        .trim()
 
-      console.log('Processing page:', {
-        storage: useLocal ? 'local' : 'pinecone',
-        page: page.pageNumber,
-        docName: doc.name
-      })
+      if (!pageText) {
+        console.log(`No text content on page ${pageNum}`)
+        return
+      }
 
       if (useLocal) {
-        // Local storage path
-        const response = await fetch('/api/local-embedding', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+        // Store in local IndexedDB
+        await clientLocalStore.storePage({
+          text: pageText,
+          pageNumber: pageNum,
+          documentId: doc.id,
+          pdfName: doc.name
         })
+      } else {
+        // Store in Pinecone
+        await storePageEmbeddings({
+          text: pageText,
+          pageNumber: pageNum,
+          pdfName: doc.name
+        })
+      }
 
-        if (!response.ok) {
-          throw new Error('Failed to create local embedding')
+      // Update processed state to include page-level tracking
+      const updatedProcessed = {
+        ...processedDocuments,
+        [docKey]: {
+          ...processedDocuments[docKey],
+          timestamp: Date.now(),
+          pageCount: page.pageNumber,
+          pages: {
+            ...(processedDocuments[docKey]?.pages || {}),
+            [pageNum]: true
+          }
         }
-
-        const { embedding } = await response.json()
-        
-        // Store in IndexedDB
-        const vectorId = `${doc.id}-${page.pageNumber}-${Date.now()}`
-        await localVectorStore.storeVector(
-          vectorId,
-          embedding,
-          {
-            documentId: doc.id,
-            pageNumber: page.pageNumber,
-            pdfName: doc.name,
-            text
-          }
-        )
-
-        console.log('Stored in local IndexedDB:', {
-          page: page.pageNumber,
-          docName: doc.name,
-          vectorId
-        })
-
-        return // Exit early for local storage path
       }
-
-      // Pinecone storage path
-      const response = await fetch('/api/similar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          metadata: {
-            documentId: doc.id,
-            pageNumber: page.pageNumber,
-            pdfName: doc.name
-          }
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to store in Pinecone')
-      }
-
-      // Update progress
-      setProcessingProgress(prev => ({
-        ...prev,
-        current: page.pageNumber
-      }))
+      setProcessedDocuments(updatedProcessed)
+      localStorage.setItem('processedDocuments', JSON.stringify(updatedProcessed))
 
     } catch (error) {
-      console.error('Error processing page:', error)
-      setNotification({
-        type: 'error',
-        message: `Failed to process page ${page.pageNumber}`
-      })
+      console.error(`Error processing page ${pageNum}:`, error)
+      throw error
     }
   }
 

@@ -317,6 +317,38 @@ class LocalVectorStore {
       throw error
     }
   }
+
+  async checkDocumentExists(pdfName) {
+    await this.initPromise
+    console.log('Checking if document exists:', pdfName)
+
+    try {
+      const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+      const store = transaction.objectStore(VECTOR_STORE)
+      const request = store.getAll()
+
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+          const vectors = request.result
+          const exists = vectors.some(v => v.metadata.pdfName === pdfName)
+          console.log('Document existence check:', {
+            pdfName,
+            exists,
+            totalVectors: vectors.length
+          })
+          resolve(exists)
+        }
+
+        request.onerror = (event) => {
+          console.error('Error checking document:', event.target.error)
+          reject(event.target.error)
+        }
+      })
+    } catch (error) {
+      console.error('Error in checkDocumentExists:', error)
+      throw error
+    }
+  }
 }
 
 // Create and export a singleton instance

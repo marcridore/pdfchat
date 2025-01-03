@@ -71,9 +71,9 @@ export async function handleClientChat(message) {
     const queryVector = await getEmbedding(cleanQuery)
     console.log('Received embedding from server')
     
-    // Use embedding for local search with even more permissive threshold for names
+    // Use embedding for local search with lower threshold for fuzzy name matching
     console.log('Searching local vectors with embedding...')
-    const results = await clientLocalStore.searchSimilar(cleanQuery, queryVector, 5, 0.05)
+    const results = await clientLocalStore.searchSimilar(cleanQuery, queryVector, 5, 0.01)
     console.log('Local search complete:', {
       resultsFound: results?.length || 0,
       topScore: results[0]?.similarity || 0
@@ -87,14 +87,8 @@ export async function handleClientChat(message) {
       }
     }
 
-    // Filter by more permissive similarity threshold for names
-    const relevantResults = results.filter(r => {
-      // Keep results with decent similarity
-      if (r.similarity > 0.05) {
-        return true
-      }
-      return false
-    })
+    // Filter by similarity threshold
+    const relevantResults = results.filter(r => r.similarity > 0.01)
     
     if (relevantResults.length === 0) {
       console.log('No results above similarity threshold')

@@ -378,84 +378,32 @@ async function waitForDocumentIndexing(pdfName, maxAttempts = 5) {
 // Update storePageEmbeddings to use a lock mechanism
 const processingDocuments = new Set();
 
-export async function storePageEmbeddings(text, pageNumber, metadata, useLocalStorage = false) {
-  try {
-    if (useLocalStorage) {
-      // Get embedding from local API endpoint
-      const response = await fetch('/api/local-embedding', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text })
-      })
+export async function storePageEmbeddings({ text, pageNumber, pdfName }) {
+  console.log('Creating new embedding for:', { pdfName, pageNumber, textLength: text.length })
 
-      if (!response.ok) {
-        throw new Error('Failed to create local embedding')
-      }
-
-      const { embedding } = await response.json()
-      
-      // Store in local vector store
-      const vectorId = `${metadata.documentId}-${pageNumber}-${Date.now()}`
-      await localVectorStore.storeVector(
-        vectorId,
-        embedding,
-        {
-          documentId: metadata.documentId,
-          pageNumber: pageNumber,
-          pdfName: metadata.pdfName,
-          text
-        }
-      )
-
-      console.log('Successfully stored vector locally:', {
-        id: vectorId,
+  const response = await fetch('/api/similar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      metadata: {
         pageNumber,
-        documentName: metadata.pdfName
-      })
-
-      return { id: vectorId }
-
-    } else {
-      // Use Pinecone storage
-      console.log('Creating new embedding for:', {
-        pdfName: metadata.pdfName,
-        pageNumber,
-        textLength: text.length
-      })
-
-      const response = await fetch('/api/similar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text,
-          metadata: {
-            ...metadata,
-            pageNumber
-          }
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to store embedding in Pinecone')
+        pdfName
       }
+    })
+  })
 
-      const result = await response.json()
-      console.log('Successfully stored embedding in Pinecone:', {
-        id: result.id,
-        pdfName: metadata.pdfName,
-        pageNumber
-      })
-
-      return result
-    }
-  } catch (error) {
-    console.error('Error in storePageEmbeddings:', error)
-    throw error
+  if (!response.ok) {
+    throw new Error('Failed to store in Pinecone')
   }
+
+  console.log('Successfully stored embedding:', {
+    id: `${pdfName}-${pageNumber}`,
+    pdfName,
+    pageNumber
+  })
+
+  return response.json()
 }
 
 // Add new function to store entire document
@@ -597,4 +545,38 @@ export async function checkDocumentByName(pdfName) {
         })
         return false
     }
+}
+
+export async function checkDocumentExistsInPinecone(pdfName) {
+  try {
+    console.log('Checking document in Pinecone:', pdfName)
+    
+    const response = await fetch('/api/check-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfName })
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      console.error('Pinecone check failed:', data)
+      throw new Error(data.details || 'Failed to check document in Pinecone')
+    }
+
+    console.log('Pinecone check result:', {
+      pdfName,
+      exists: data.exists,
+      debug: data.debug
+    })
+
+    return data.exists
+  } catch (error) {
+    console.error('Error checking document in Pinecone:', {
+      pdfName,
+      error: error.message,
+      stack: error.stack
+    })
+    return false
+  }
 }

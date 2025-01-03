@@ -1,96 +1,99 @@
-import { 
-  findSimilar, 
-  checkDocumentByName, 
-  storeEmbedding, 
-  checkDocumentExists,
-  getOrCreateIndex
-} from '@/app/lib/embeddings'
 import { NextResponse } from 'next/server'
+import { Pinecone } from '@pinecone-database/pinecone'
+
+// Check for required environment variables
+if (!process.env.PINECONE_API_KEY || !process.env.PINECONE_INDEX) {
+  throw new Error('Required Pinecone environment variables are not defined')
+}
+
+const INDEX_NAME = process.env.PINECONE_INDEX
+
+// Initialize Pinecone with error handling
+let pc
+try {
+  pc = new Pinecone({
+    apiKey: process.env.PINECONE_API_KEY
+  })
+  console.log('Pinecone client initialized with:', {
+    indexName: INDEX_NAME
+  })
+} catch (error) {
+  console.error('Failed to initialize Pinecone client:', error)
+  throw error
+}
 
 export async function POST(req) {
   try {
-    const { text, metadata, checkDocumentOnly } = await req.json()
-    const index = await getOrCreateIndex()
+    const { text, metadata } = await req.json()
+    
+    // Get embedding from Together API
+    const embeddingResponse = await fetch('https://api.together.xyz/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'togethercomputer/m2-bert-80M-32k-retrieval',
+        input: [text]
+      })
+    })
 
-    // Special route just for checking document existence
-    if (checkDocumentOnly) {
-      const exists = await checkDocumentByName(metadata.pdfName)
-      const results = await index.query({
-        vector: Array(768).fill(0),
-        topK: 10,
-        filter: { pdfName: { $eq: metadata.pdfName } },
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to create embedding')
+    }
+
+    const { data } = await embeddingResponse.json()
+    const vector = data[0].embedding
+
+    // Get Pinecone index
+    const index = pc.index(INDEX_NAME)
+
+    if (metadata) {
+      // Store the vector with metadata
+      const id = `${metadata.pdfName}-${metadata.pageNumber}-${Date.now()}`
+      
+      console.log('Storing vector in Pinecone:', {
+        indexName: INDEX_NAME,
+        id,
+        metadata
+      })
+
+      // Using the new upsert format
+      await index.upsert([{
+        id,
+        values: vector,
+        metadata: {
+          ...metadata,
+          text
+        }
+      }])
+
+      console.log('Successfully stored embedding:', {
+        id,
+        pdfName: metadata.pdfName,
+        pageNumber: metadata.pageNumber
+      })
+
+      return NextResponse.json({ id })
+    } else {
+      // Perform similarity search
+      const queryResponse = await index.query({
+        vector,
+        topK: 5,
         includeMetadata: true
       })
 
-      console.log('Document existence check:', {
-        pdfName: metadata.pdfName,
-        exists,
-        matchCount: results.matches?.length || 0,
-        timestamp: Date.now()
-      })
-
       return NextResponse.json({ 
-        exists,
-        pdfName: metadata.pdfName,
-        pageCount: results.matches?.length || 0,
-        firstUploadedAt: results.matches?.[0]?.metadata?.timestamp || null
-      })
-    }
-
-    if (!text) {
-      return NextResponse.json(
-        { error: 'Text is required' },
-        { status: 400 }
-      )
-    }
-
-    // For similarity search
-    if (!metadata) {
-      console.log('Performing similarity search for:', {
-        searchText: text.substring(0, 50) + '...',
-        textLength: text.length
-      })
-
-      const similar = await findSimilar(text, 5) // Get top 5 matches
-      
-      // Log the results for debugging
-      console.log('Similarity search results:', {
-        query: text.substring(0, 50) + '...',
-        resultCount: similar.length,
-        results: similar.map(s => ({
-          score: s.score,
-          text: s.metadata.text.substring(0, 50) + '...',
-          page: s.metadata.pageNumber
+        matches: queryResponse.matches.map(match => ({
+          ...match.metadata,
+          score: match.score
         }))
-      })
-
-      return NextResponse.json({ similar })
-    }
-
-    // If we have metadata, try to store the embedding
-    if (metadata) {
-      // Check if this specific page already exists
-      const pageExists = await checkDocumentExists(metadata.documentId, metadata.pageNumber)
-      if (pageExists) {
-        return NextResponse.json({ 
-          message: 'Page already exists',
-          exists: true
-        })
-      }
-
-      // Store the embedding
-      await storeEmbedding(text, metadata)
-      return NextResponse.json({ 
-        message: 'Embedding stored successfully',
-        exists: false
       })
     }
 
   } catch (error) {
-    console.error('Error in similar route:', {
-      error: error.message,
-      stack: error.stack
-    })
+    console.error('Error in similar route:', error)
     return NextResponse.json(
       { error: error.message }, 
       { status: 500 }
