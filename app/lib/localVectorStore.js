@@ -577,6 +577,65 @@ class LocalVectorStore {
       }
     })
   }
+
+  async getVectorsByDocument(pdfName) {
+    await this.initPromise
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+        const store = transaction.objectStore(VECTOR_STORE)
+        const request = store.getAll()
+
+        request.onsuccess = () => {
+          const vectors = request.result.filter(
+            vector => vector.metadata.pdfName === pdfName
+          )
+          resolve(vectors)
+        }
+
+        request.onerror = () => {
+          reject(request.error)
+        }
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
+  async deleteDocument(pdfName) {
+    await this.initPromise
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = this.db.transaction([VECTOR_STORE], 'readwrite')
+        const store = transaction.objectStore(VECTOR_STORE)
+        
+        // Get all records
+        const request = store.openCursor()
+        
+        request.onsuccess = (event) => {
+          const cursor = event.target.result
+          if (cursor) {
+            // If this record belongs to the document, delete it
+            if (cursor.value.metadata.pdfName === pdfName) {
+              cursor.delete()
+            }
+            cursor.continue()
+          } else {
+            // No more records to process
+            resolve()
+          }
+        }
+
+        request.onerror = () => {
+          reject(request.error)
+        }
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
 }
 
 // Helper function to calculate string similarity with improved fuzzy matching

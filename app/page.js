@@ -21,6 +21,7 @@ import { clientLocalStore } from './lib/clientLocalStore'
 import { handleClientChat } from './lib/clientChat'
 import { storePageEmbeddings } from './lib/embeddings'
 import { checkDocumentExistsInPinecone } from './lib/embeddings'
+import DocumentManager from './components/DocumentManager'
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -70,6 +71,7 @@ export default function Home() {
   const [useLocalVectorization, setUseLocalVectorization] = useState(false)
   const [isStoragePreferenceLoaded, setIsStoragePreferenceLoaded] = useState(false)
   const [isLocalStoreReady, setIsLocalStoreReady] = useState(false)
+  const [isDocManagerOpen, setIsDocManagerOpen] = useState(false)
 
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -1165,6 +1167,15 @@ export default function Home() {
     }
   }, [useLocalVectorization, isLocalStoreReady])
 
+  // Add handler for document deletion
+  const handleDocumentDeleted = (docName) => {
+    // Update your local state if needed
+    setNotification({
+      type: 'success',
+      message: `Document "${docName}" has been deleted`
+    })
+  }
+
   return (
     <main className="flex min-h-screen bg-gray-50">
       <Notification 
@@ -1369,6 +1380,18 @@ export default function Home() {
             />
           </svg>
         </button>
+
+        <button
+          onClick={() => setIsDocManagerOpen(true)}
+          className="bg-purple-600 text-white p-3 rounded-full shadow-lg hover:bg-purple-700 transition-colors"
+          title="Manage Documents"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+              d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" 
+            />
+          </svg>
+        </button>
       </div>
 
       {/* Modals */}
@@ -1390,6 +1413,12 @@ export default function Home() {
         documentName={currentDocument?.name || ''}
         currentPage={currentPage}
         pdfDoc={pdfDocRef.current}
+      />
+
+      <DocumentManager 
+        isOpen={isDocManagerOpen}
+        onClose={() => setIsDocManagerOpen(false)}
+        onDocumentDeleted={handleDocumentDeleted}
       />
     </main>
   )
