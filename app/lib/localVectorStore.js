@@ -226,21 +226,29 @@ class LocalVectorStore {
 
   async listDocuments() {
     await this.initPromise
+    
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
-      const store = transaction.objectStore(VECTOR_STORE)
-      const request = store.getAll()
+      try {
+        const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+        const store = transaction.objectStore(VECTOR_STORE)
+        const request = store.getAll()
 
-      request.onsuccess = () => {
-        const vectors = request.result
-        const documents = [...new Set(vectors.map(v => v.metadata.pdfName))]
-        console.log('LocalVectorStore: Listed documents:', documents)
-        resolve(documents)
-      }
+        request.onsuccess = () => {
+          // Get unique document names from all vectors
+          const uniqueDocs = [...new Set(
+            request.result.map(vector => vector.metadata.pdfName)
+          )]
+          console.log('Listed documents from local store:', uniqueDocs)
+          resolve(uniqueDocs)
+        }
 
-      request.onerror = () => {
-        console.error('LocalVectorStore: Failed to list documents:', request.error)
-        reject(request.error)
+        request.onerror = (event) => {
+          console.error('Error listing documents:', event.target.error)
+          reject(event.target.error)
+        }
+      } catch (error) {
+        console.error('Error in listDocuments:', error)
+        reject(error)
       }
     })
   }

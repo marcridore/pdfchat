@@ -1,48 +1,94 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { localVectorStore } from '../lib/localVectorStore'
 
-export default function DocumentManager({ isOpen, onClose, onDocumentDeleted }) {
+export default function DocumentManager({ isOpen, onClose, onDocumentDeleted, useLocalVectorization }) {
   const [documents, setDocuments] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [deletingDoc, setDeletingDoc] = useState(null)
 
-  useEffect(() => {
-    if (isOpen) {
-      loadDocuments()
-    }
-  }, [isOpen])
-
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
-      const docs = await localVectorStore.listDocuments()
-      
-      // Group documents by name and count their vectors
-      const groupedDocs = await Promise.all(docs.map(async docName => {
-        const vectors = await localVectorStore.getVectorsByDocument(docName)
-        return {
-          name: docName,
-          vectorCount: vectors.length,
-          lastModified: vectors[0]?.metadata?.timestamp || Date.now()
-        }
-      }))
+      console.log('Loading documents from:', useLocalVectorization ? 'local' : 'pinecone')
 
-      setDocuments(groupedDocs)
+      if (useLocalVectorization) {
+        // Load from local store
+        const docs = await localVectorStore.listDocuments()
+        const groupedDocs = await Promise.all(docs.map(async docName => {
+          const vectors = await localVectorStore.getVectorsByDocument(docName)
+          return {
+            name: docName,
+            vectorCount: vectors.length,
+            lastModified: vectors[0]?.metadata?.timestamp || Date.now(),
+            storage: 'local'
+          }
+        }))
+        setDocuments(groupedDocs)
+      } else {
+        // Load from Pinecone
+        try {
+          const response = await fetch('/api/list-documents')
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
+          }
+          const data = await response.json()
+          console.log('Pinecone documents loaded:', data)
+          
+          if (data.documents) {
+            setDocuments(data.documents.map(doc => ({
+              ...doc,
+              storage: 'pinecone'
+            })))
+          } else {
+            throw new Error('No documents data received from Pinecone')
+          }
+        } catch (err) {
+          console.error('Error loading Pinecone documents:', err)
+          setError('Failed to load documents from Pinecone')
+        }
+      }
     } catch (err) {
       console.error('Error loading documents:', err)
-      setError('Failed to load documents')
+      setError(`Failed to load documents from ${useLocalVectorization ? 'local storage' : 'Pinecone'}`)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [useLocalVectorization])
+
+  useEffect(() => {
+    if (isOpen) {
+      console.log('DocumentManager opened with storage type:', 
+        useLocalVectorization ? 'local' : 'pinecone'
+      )
+      loadDocuments()
+    }
+  }, [isOpen, useLocalVectorization, loadDocuments])
 
   const handleDelete = async (docName) => {
     try {
       setDeletingDoc(docName)
-      await localVectorStore.deleteDocument(docName)
+      
+      if (useLocalVectorization) {
+        // Delete from local store
+        await localVectorStore.deleteDocument(docName)
+      } else {
+        // Delete from Pinecone
+        const response = await fetch('/api/delete-document', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ pdfName: docName })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to delete document from Pinecone')
+        }
+      }
+
       await loadDocuments() // Refresh the list
       if (onDocumentDeleted) {
         onDocumentDeleted(docName)
@@ -61,7 +107,12 @@ export default function DocumentManager({ isOpen, onClose, onDocumentDeleted }) 
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
       <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">Manage Documents</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">Manage Documents</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Storage: {useLocalVectorization ? 'Local IndexedDB' : 'Pinecone'}
+            </p>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-500 hover:text-gray-700"
@@ -83,7 +134,9 @@ export default function DocumentManager({ isOpen, onClose, onDocumentDeleted }) 
             <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
           </div>
         ) : documents.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No documents found in local storage</p>
+          <p className="text-gray-500 text-center py-8">
+            No documents found in {useLocalVectorization ? 'local storage' : 'Pinecone'}
+          </p>
         ) : (
           <div className="space-y-4">
             {documents.map((doc) => (

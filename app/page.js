@@ -97,6 +97,7 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('useLocalVectorization')
       const value = stored ? JSON.parse(stored) : false
+      console.log('Storage preference loaded:', value)
       setUseLocalVectorization(value)
       setIsStoragePreferenceLoaded(true)
     }
@@ -1419,6 +1420,7 @@ export default function Home() {
         isOpen={isDocManagerOpen}
         onClose={() => setIsDocManagerOpen(false)}
         onDocumentDeleted={handleDocumentDeleted}
+        useLocalVectorization={useLocalVectorization}
       />
     </main>
   )

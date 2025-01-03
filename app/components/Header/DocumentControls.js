@@ -14,6 +14,11 @@ export default function DocumentControls({
   onVectorizationSettingChange,
   setNotification 
 }) {
+  const handleStorageChange = (useLocal) => {
+    console.log('Changing storage type to:', useLocal ? 'local' : 'pinecone')
+    onVectorizationSettingChange(useLocal)
+  }
+
   return (
     <div className="bg-white p-4 rounded-xl shadow-sm mb-6 flex flex-wrap items-center gap-4">
       <select
