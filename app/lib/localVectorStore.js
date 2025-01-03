@@ -75,42 +75,47 @@ class LocalVectorStore {
 
   async storeVector(id, vector, metadata) {
     await this.initPromise
-    console.log('LocalVectorStore: Attempting to store vector:', { id, metadata })
+    console.log('Storing vector:', {
+      id,
+      vectorLength: vector.length,
+      metadata: {
+        ...metadata,
+        text: metadata.text.substring(0, 50) + '...'
+      }
+    })
 
     if (!this.db) {
-      console.error('LocalVectorStore: Database not initialized')
       throw new Error('Database not initialized')
     }
 
     return new Promise((resolve, reject) => {
       try {
         const transaction = this.db.transaction([VECTOR_STORE], 'readwrite')
-        console.log('LocalVectorStore: Created transaction')
-        
         const store = transaction.objectStore(VECTOR_STORE)
-        console.log('LocalVectorStore: Got object store')
 
         const data = {
           id,
-          vector,
+          vector: Array.from(vector), // Ensure vector is stored as array
           metadata,
           timestamp: Date.now()
         }
-        console.log('LocalVectorStore: Preparing to store data:', data)
 
         const request = store.put(data)
 
         request.onsuccess = () => {
-          console.log('LocalVectorStore: Vector stored successfully:', id)
+          console.log('Vector stored successfully:', {
+            id,
+            text: metadata.text.substring(0, 50)
+          })
           resolve()
         }
 
         request.onerror = (event) => {
-          console.error('LocalVectorStore: Failed to store vector:', event.target.error)
+          console.error('Failed to store vector:', event.target.error)
           reject(event.target.error)
         }
       } catch (error) {
-        console.error('LocalVectorStore: Error in storeVector:', error)
+        console.error('Error in storeVector:', error)
         reject(error)
       }
     })
@@ -162,11 +167,35 @@ class LocalVectorStore {
 
   cosineSimilarity(vecA, vecB) {
     try {
-      const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0)
-      const normA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0))
-      const normB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0))
+      const arrayA = Array.isArray(vecA) ? vecA : Object.values(vecA)
+      const arrayB = Array.isArray(vecB) ? vecB : Object.values(vecB)
+
+      if (arrayA.length !== arrayB.length) {
+        console.error('Vector length mismatch:', {
+          vecALength: arrayA.length,
+          vecBLength: arrayB.length
+        })
+        return 0
+      }
+
+      const dotProduct = arrayA.reduce((sum, a, i) => sum + a * arrayB[i], 0)
+      const normA = Math.sqrt(arrayA.reduce((sum, a) => sum + a * a, 0))
+      const normB = Math.sqrt(arrayB.reduce((sum, b) => sum + b * b, 0))
+      
+      if (normA === 0 || normB === 0) {
+        return 0
+      }
+
       const similarity = dotProduct / (normA * normB)
       
+      // Debug similarity calculation
+      console.log('Similarity calculation:', {
+        dotProduct,
+        normA,
+        normB,
+        similarity
+      })
+
       return similarity
     } catch (error) {
       console.error('Error calculating similarity:', error)
@@ -255,65 +284,86 @@ class LocalVectorStore {
     })
   }
 
-  async searchSimilar(query, queryVector, limit = 3, threshold = 0.2) {
-    await this.initPromise
-    console.log('Searching local vectors for:', { 
-      query, 
-      limit,
-      threshold,
-      vectorLength: queryVector.length 
-    })
-
+  async searchSimilar(query, limit = 5, threshold = 0.1) {
     try {
+      // First, get embedding for the query text
+      const embeddingResponse = await fetch('/api/embedding', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text: query })
+      })
+
+      if (!embeddingResponse.ok) {
+        throw new Error('Failed to create query embedding')
+      }
+
+      const { embedding: queryVector } = await embeddingResponse.json()
+
+      // Now proceed with vector comparison
       const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
       const store = transaction.objectStore(VECTOR_STORE)
       const request = store.getAll()
+
+      console.log('Starting search for:', {
+        query,
+        vectorLength: queryVector.length,
+        threshold
+      })
 
       return new Promise((resolve, reject) => {
         request.onsuccess = () => {
           const vectors = request.result
           
-          // Calculate similarities and check for exact matches
-          const results = vectors.map(item => {
-            const similarity = this.cosineSimilarity(queryVector, item.vector)
-            const exactMatch = item.metadata.text.toLowerCase().includes(query.toLowerCase())
-            return {
-              ...item,
-              similarity: exactMatch ? 1.0 : similarity, // Boost exact matches
-              exactMatch
-            }
-          })
-          .filter(item => item.exactMatch || item.similarity > threshold)
-          .sort((a, b) => {
-            // Sort by exact match first, then by similarity
-            if (a.exactMatch && !b.exactMatch) return -1
-            if (!a.exactMatch && b.exactMatch) return 1
-            return b.similarity - a.similarity
-          })
-          .slice(0, limit)
-
-          console.log('Local search results:', {
-            query,
+          console.log('Database contents:', {
             totalVectors: vectors.length,
-            matches: results.length,
-            exactMatches: results.filter(r => r.exactMatch).length,
+            sampleDoc: vectors[0] ? {
+              text: vectors[0].metadata.text,
+              vectorLength: vectors[0].vector.length
+            } : null
+          })
+
+          const results = vectors
+            .map(item => {
+              const storedVector = Array.isArray(item.vector) ? item.vector : Object.values(item.vector)
+              const similarity = this.cosineSimilarity(queryVector, storedVector)
+              
+              // Debug each comparison
+              console.log('Comparing vectors:', {
+                docText: item.metadata.text.substring(0, 50),
+                similarity,
+                threshold
+              })
+
+              return {
+                ...item.metadata,
+                similarity,
+                text: item.metadata.text
+              }
+            })
+            .filter(item => item.similarity > threshold)
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, limit)
+
+          console.log('Search results:', {
+            query,
+            totalResults: results.length,
             topResults: results.map(r => ({
-              text: r.metadata.text.substring(0, 50) + '...',
-              score: r.similarity,
-              exactMatch: r.exactMatch
+              text: r.text.substring(0, 50),
+              similarity: r.similarity
             }))
           })
 
           resolve(results)
         }
-
-        request.onerror = (event) => {
-          console.error('Error searching vectors:', event.target.error)
-          reject(event.target.error)
-        }
+        request.onerror = () => reject(request.error)
       })
     } catch (error) {
-      console.error('Error in searchSimilar:', error)
+      console.error('Error in searchSimilar:', {
+        error,
+        query
+      })
       throw error
     }
   }
@@ -349,6 +399,179 @@ class LocalVectorStore {
       throw error
     }
   }
+
+  async searchByKeyword(query, limit = 5) {
+    await this.initPromise
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+        const store = transaction.objectStore(VECTOR_STORE)
+        const request = store.getAll()
+
+        request.onsuccess = () => {
+          const vectors = request.result
+          const queryTerms = query.toLowerCase().split(/\s+/)
+          
+          const results = vectors
+            .map(item => {
+              const text = item.metadata.text.toLowerCase()
+              let score = 0
+              let maxWordScore = 0
+
+              // Split text into words for word-level matching
+              const words = text.split(/\s+/)
+              
+              queryTerms.forEach(term => {
+                words.forEach(word => {
+                  const similarity = calculateStringSimilarity(term, word)
+                  if (similarity > 0.7) { // Lower threshold for fuzzy matches
+                    const wordScore = similarity * (
+                      word === term ? 2.0 : // Exact match
+                      similarity > 0.9 ? 1.5 : // Very close match
+                      1.0 // Fuzzy match
+                    )
+                    maxWordScore = Math.max(maxWordScore, wordScore)
+                  }
+                })
+              })
+
+              // Use the highest word match score
+              score = maxWordScore
+
+              return {
+                ...item.metadata,
+                id: item.id,
+                text: item.metadata.text,
+                score: score
+              }
+            })
+            .filter(item => item.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit)
+
+          resolve(results)
+        }
+
+        request.onerror = () => reject(request.error)
+      } catch (error) {
+        console.error('Error in keyword search:', error)
+        reject(error)
+      }
+    })
+  }
+
+  async checkPageExists(pdfName, pageNumber) {
+    await this.initPromise
+    
+    try {
+      const transaction = this.db.transaction([VECTOR_STORE], 'readonly')
+      const store = transaction.objectStore(VECTOR_STORE)
+      const request = store.getAll()
+
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+          const vectors = request.result
+          const exists = vectors.some(v => 
+            v.metadata.pdfName === pdfName && 
+            v.metadata.pageNumber === pageNumber
+          )
+          console.log('Page existence check:', {
+            pdfName,
+            pageNumber,
+            exists
+          })
+          resolve(exists)
+        }
+
+        request.onerror = (event) => {
+          console.error('Error checking page:', event.target.error)
+          reject(event.target.error)
+        }
+      })
+    } catch (error) {
+      console.error('Error in checkPageExists:', error)
+      throw error
+    }
+  }
+}
+
+// Helper function to calculate string similarity with improved fuzzy matching
+function calculateStringSimilarity(str1, str2) {
+  // Convert to lowercase for case-insensitive comparison
+  const s1 = str1.toLowerCase()
+  const s2 = str2.toLowerCase()
+  
+  // Quick exact match check
+  if (s1 === s2) return 1.0
+
+  // Handle very short strings differently
+  if (s1.length < 3 || s2.length < 3) {
+    return s1 === s2 ? 1.0 : 0.0
+  }
+
+  // Calculate Levenshtein distance
+  const track = Array(s2.length + 1).fill(null).map(() =>
+    Array(s1.length + 1).fill(null))
+  
+  for (let i = 0; i <= s1.length; i++) track[0][i] = i
+  for (let j = 0; j <= s2.length; j++) track[j][0] = j
+
+  for (let j = 1; j <= s2.length; j++) {
+    for (let i = 1; i <= s1.length; i++) {
+      // Lower cost for common typos (e.g., adjacent keys, vowel substitutions)
+      const cost = getTypoCost(s1[i - 1], s2[j - 1])
+      track[j][i] = Math.min(
+        track[j][i - 1] + 1, // deletion
+        track[j - 1][i] + 1, // insertion
+        track[j - 1][i - 1] + cost // substitution
+      )
+    }
+  }
+
+  const distance = track[s2.length][s1.length]
+  const maxLength = Math.max(s1.length, s2.length)
+  
+  // Improved similarity score calculation
+  const similarity = 1 - (distance / maxLength)
+  
+  // Boost score for partial matches at word boundaries
+  if (s1.includes(s2) || s2.includes(s1)) {
+    return Math.min(1.0, similarity + 0.2)
+  }
+
+  return similarity
+}
+
+// Helper to determine cost of character substitution
+function getTypoCost(char1, char2) {
+  // Same character = no cost
+  if (char1 === char2) return 0
+  
+  // Common character substitutions
+  const commonSubstitutions = {
+    'a': 'aeioqu',
+    'e': 'aeiou',
+    'i': 'ieyo',
+    'o': 'oau',
+    'u': 'uov',
+    'm': 'mn',
+    'n': 'nm',
+    'c': 'ck',
+    'k': 'ck',
+    'p': 'pb',
+    'b': 'bp',
+    'd': 'dr',
+    'r': 'rd'
+  }
+
+  // Lower cost for common substitutions
+  if (commonSubstitutions[char1]?.includes(char2) || 
+      commonSubstitutions[char2]?.includes(char1)) {
+    return 0.5
+  }
+
+  return 1
 }
 
 // Create and export a singleton instance

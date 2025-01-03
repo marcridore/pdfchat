@@ -27,10 +27,15 @@ export class ClientLocalStore {
     }
   }
 
-  async searchSimilar(query, queryVector, limit = 3, threshold = 0.01) {
+  async searchSimilar(query, limit = 5, threshold = 0.1) {
     await this.ensureInitialized()
     console.log('ClientLocalStore: Searching with query:', query)
-    return localVectorStore.searchSimilar(query, queryVector, limit, threshold)
+    return localVectorStore.searchSimilar(query, limit, threshold)
+  }
+
+  async searchByKeyword(query, limit = 5) {
+    await this.ensureInitialized()
+    return localVectorStore.searchByKeyword(query, limit)
   }
 
   async checkDocumentExists(pdfName) {
@@ -38,14 +43,19 @@ export class ClientLocalStore {
     return localVectorStore.checkDocumentExists(pdfName)
   }
 
-  async storePage({ text, pageNumber, documentId, pdfName }) {
+  async storePage({ text, pageNumber, documentId, pdfName, skipExistCheck = false }) {
     await this.ensureInitialized()
     
-    // Check if document already exists
-    const exists = await this.checkDocumentExists(pdfName)
-    if (exists) {
-      console.log('Document already exists in local store:', pdfName)
-      return null
+    // Only check if page exists when not processing a full document
+    if (!skipExistCheck) {
+      const exists = await this.checkPageExists(pdfName, pageNumber)
+      if (exists) {
+        console.log('Page already exists in local store:', {
+          pdfName,
+          pageNumber
+        })
+        return null
+      }
     }
     
     console.log('Creating new embedding for:', { 
@@ -55,7 +65,7 @@ export class ClientLocalStore {
     })
 
     // Get embedding from local API endpoint
-    const response = await fetch('/api/local-embedding', {
+    const response = await fetch('/api/embedding', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -64,7 +74,7 @@ export class ClientLocalStore {
     })
 
     if (!response.ok) {
-      throw new Error('Failed to create local embedding')
+      throw new Error('Failed to create embedding')
     }
 
     const { embedding } = await response.json()
@@ -82,13 +92,18 @@ export class ClientLocalStore {
       }
     )
 
-    console.log('Successfully stored vector locally:', {
+    console.log('Successfully stored vector:', {
       id: vectorId,
       pageNumber,
       documentName: pdfName
     })
 
     return { id: vectorId }
+  }
+
+  async checkPageExists(pdfName, pageNumber) {
+    await this.ensureInitialized()
+    return localVectorStore.checkPageExists(pdfName, pageNumber)
   }
 }
 

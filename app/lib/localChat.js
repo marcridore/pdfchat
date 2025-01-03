@@ -23,6 +23,27 @@ const getLLMResponse = async (prompt) => {
   return result.choices[0].message.content
 }
 
+function calculateCosineSimilarity(vecA, vecB) {
+  // Dot product
+  const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0)
+  
+  // Magnitudes
+  const magA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0))
+  const magB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0))
+  
+  // Cosine similarity
+  return dotProduct / (magA * magB)
+}
+
+export async function findSimilarPassages(queryVector, threshold = 0.3) {
+  const results = await localVectorStore.searchSimilar(queryVector)
+  
+  // Filter and sort by actual similarity
+  return results
+    .filter(result => result.similarity > threshold)
+    .sort((a, b) => b.similarity - a.similarity)
+}
+
 export async function handleLocalChat(message) {
   try {
     // Ensure client store is initialized

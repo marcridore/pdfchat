@@ -1,21 +1,22 @@
 import { NextResponse } from 'next/server'
 
-const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY
-
 export async function POST(req) {
   try {
     const { text } = await req.json()
-    console.log('Creating embedding for text:', text.substring(0, 50) + '...')
+
+    if (!text) {
+      return NextResponse.json({ error: 'Text is required' }, { status: 400 })
+    }
 
     const response = await fetch('https://api.together.xyz/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${TOGETHER_API_KEY}`,
+        'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: 'togethercomputer/m2-bert-80M-32k-retrieval',
-        input: [text.replace('\n', ' ')] // Replace newlines with spaces
+        input: [text]
       })
     })
 
@@ -24,15 +25,10 @@ export async function POST(req) {
     }
 
     const data = await response.json()
-    return NextResponse.json({
-      embedding: data.data[0].embedding
-    })
+    return NextResponse.json({ embedding: data.data[0].embedding })
 
   } catch (error) {
-    console.error('Embedding error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create embedding' },
-      { status: 500 }
-    )
+    console.error('Error creating embedding:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 } 

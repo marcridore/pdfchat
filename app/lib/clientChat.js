@@ -48,11 +48,80 @@ async function getLLMResponse(prompt) {
   return result.response
 }
 
+async function searchLocalVectors(query, options = {}) {
+  try {
+    console.log('Starting hybrid search for:', query)
+    
+    // 1. Exact/Keyword Match with higher weight
+    const exactMatches = await clientLocalStore.searchByKeyword(query)
+    console.log('Keyword matches:', {
+      count: exactMatches.length,
+      matches: exactMatches.map(m => ({
+        text: m.text.substring(0, 50),
+        score: m.score
+      }))
+    })
+
+    // 2. Semantic Search
+    const semanticResults = await clientLocalStore.searchSimilar(query, 5, 0.1)
+    console.log('Semantic matches:', {
+      count: semanticResults.length,
+      matches: semanticResults.map(m => ({
+        text: m.text.substring(0, 50),
+        similarity: m.similarity
+      }))
+    })
+
+    // 3. Combine and Re-rank Results
+    const combined = new Map()
+
+    // Add exact matches first with boosted scores (but normalized to 0-1 range)
+    exactMatches.forEach(match => {
+      combined.set(match.text, {
+        ...match,
+        similarity: Math.min(1.0, match.score * 1.2) // Cap at 1.0 and use lower boost
+      })
+    })
+
+    // Add or update with semantic matches
+    semanticResults.forEach(match => {
+      if (combined.has(match.text)) {
+        // If exists, take the higher score but ensure it's normalized
+        const existing = combined.get(match.text)
+        existing.similarity = Math.min(1.0, Math.max(existing.similarity, match.similarity))
+      } else {
+        combined.set(match.text, match)
+      }
+    })
+
+    // Convert to array and sort by normalized scores
+    const results = Array.from(combined.values())
+      .map(result => ({
+        ...result,
+        similarity: Math.min(1.0, result.similarity) // Ensure all scores are <= 1.0
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+
+    console.log('Combined search results:', {
+      total: results.length,
+      topResults: results.slice(0, 3).map(r => ({
+        text: r.text.substring(0, 50),
+        score: (r.similarity * 100).toFixed(1) + '%'
+      }))
+    })
+
+    return results
+  } catch (error) {
+    console.error('Error in hybrid search:', error)
+    return []
+  }
+}
+
 export async function handleClientChat(message) {
   try {
     console.log('Starting client-side chat process...')
     
-    // Clean up the query - just remove question prefixes and normalize
+    // Clean up the query
     const cleanQuery = message.toLowerCase()
       .replace(/^(who|what|where|when|why|how) (is|are|was|were) /, '')
       .trim()
@@ -71,9 +140,9 @@ export async function handleClientChat(message) {
     const queryVector = await getEmbedding(cleanQuery)
     console.log('Received embedding from server')
     
-    // Use embedding for local search with lower threshold for fuzzy name matching
+    // Search for similar content
     console.log('Searching local vectors with embedding...')
-    const results = await clientLocalStore.searchSimilar(cleanQuery, queryVector, 5, 0.01)
+    const results = await searchLocalVectors(cleanQuery)
     console.log('Local search complete:', {
       resultsFound: results?.length || 0,
       topScore: results[0]?.similarity || 0
@@ -98,11 +167,12 @@ export async function handleClientChat(message) {
       }
     }
 
+    // Map results to context format - note the change in accessing text property
     const relevantContext = relevantResults.map(result => ({
-      text: result.metadata.text,
-      page: result.metadata.pageNumber,
+      text: result.text, // Changed from result.metadata.text
+      page: result.pageNumber, // Changed from result.metadata.pageNumber
       score: result.similarity,
-      fileName: result.metadata.pdfName
+      fileName: result.pdfName // Changed from result.metadata.pdfName
     }))
 
     console.log('Processing local context:', {
@@ -123,20 +193,29 @@ export async function handleClientChat(message) {
 
       Context passages:
       ${relevantContext.map(r => `
-        [Source: ${r.fileName}, Page ${r.page}, Score: ${(r.score * 100).toFixed(1)}%]
+        [Source: ${r.fileName}, Page ${r.page}, Score: ${Math.min(100, (r.score * 100)).toFixed(1)}%]
         "${r.text}"
       `).join('\n\n')}
 
       Instructions:
-      1. If you find a direct statement about the subject in a high-scoring passage (>90%), state that information clearly
+      1. If you find a direct statement about the subject in a high-scoring passage (>70%), state that information clearly
       2. Even if the information is brief, it is still valid information - don't say there is no information
       3. Always cite your sources with page numbers
       4. Be direct and factual
       5. Don't contradict yourself or the source material
-
-      Example:
-      - Bad: "The context does not contain information about X" when there is a 100% match stating a fact about X
-      - Good: "According to [source], X is Y" when there is a matching statement
+      6. Prioritize information from passages with higher relevance scores
+      7. Consider semantic relationships and variations:
+         - Name variations (e.g., "Sam" vs "Samuel", "Mr. Walton" vs "Walton")
+         - Informal references (e.g., "the founder", "the businessman")
+         - Title variations (e.g., "CEO", "founder", "leader")
+         - Common misspellings or typos in names
+         - Relationship terms (e.g., "his wife" refers to "Helen Robson")
+      8. When answering:
+         - Use the person's full name at least once in the response
+         - Maintain consistent name usage throughout
+         - Include titles or roles when relevant
+         - Correct any name misspellings in the query while answering
+         - Connect family relationships when mentioned
     `.trim()
 
     // Get LLM response
