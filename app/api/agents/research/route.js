@@ -6,7 +6,15 @@ export async function POST(req) {
     const { message } = await req.json()
 
     // Make request to arXiv directly instead of going through research service
-    const searchUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(message)}&max_results=3`
+    // Enhance search query with better parameters
+    const enhancedQuery = message.replace(/\s+/g, '+AND+')
+    const searchUrl = `https://export.arxiv.org/api/query?` + 
+      `search_query=ti:"${encodeURIComponent(message)}"` + // Search in title
+      `+OR+abs:"${encodeURIComponent(message)}"` +        // Search in abstract
+      `+OR+all:${encodeURIComponent(enhancedQuery)}` +    // Search all fields with AND between terms
+      `&sortBy=relevance` +                               // Sort by relevance
+      `&sortOrder=descending` +                           // Most relevant first
+      `&max_results=5`                                    // Get more results
     console.log('Querying arXiv:', searchUrl)
 
     const response = await fetch(searchUrl)

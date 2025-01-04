@@ -201,32 +201,67 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
                       {/* Sources section for AI responses */}
                       {msg.role === 'assistant' && msg.context && (
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Sources</p>
+                          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">
+                            {msg.context[0]?.authors ? 'Research Papers' : 'Sources'}
+                          </p>
                           <div className="space-y-3">
                             {msg.context.map((ctx, ctxIdx) => (
                               <div key={ctxIdx} 
                                 className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-sm">
-                                <p className="text-gray-700 dark:text-gray-300 mb-2">
-                                  {truncateText(ctx.text || '')}
-                                </p>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-gray-500 dark:text-gray-400">
-                                    Page {ctx.page || 'N/A'}
-                                  </span>
-                                  <div className="flex items-center space-x-3">
-                                    <span className={`px-2.5 py-1 rounded-lg text-xs font-medium
-                                      ${getScoreClass(ctx.score)}`}>
-                                      {formatSimilarityScore(ctx.score)}% match
-                                    </span>
-                                    <button 
-                                      onClick={() => setExpandedContext(msg.context)}
-                                      className="text-blue-600 dark:text-blue-400 hover:text-blue-700 
-                                        dark:hover:text-blue-300 text-xs font-medium"
-                                    >
-                                      View details
-                                    </button>
-                                  </div>
-                                </div>
+                                {/* Research Paper Format */}
+                                {ctx.authors ? (
+                                  <>
+                                    <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-1">
+                                      {ctx.title}
+                                    </h4>
+                                    <p className="text-gray-600 dark:text-gray-400 text-xs mb-2">
+                                      {ctx.authors}
+                                    </p>
+                                    <p className="text-gray-700 dark:text-gray-300 mb-3 text-sm">
+                                      {truncateText(ctx.summary || '', 200)}
+                                    </p>
+                                    <div className="flex items-center justify-between">
+                                      <a 
+                                        href={ctx.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 dark:text-blue-400 hover:underline text-xs flex items-center gap-1"
+                                      >
+                                        View on arXiv
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" 
+                                          />
+                                        </svg>
+                                      </a>
+                                    </div>
+                                  </>
+                                ) : (
+                                  // Original Source Format
+                                  <>
+                                    <p className="text-gray-700 dark:text-gray-300 mb-2">
+                                      {truncateText(ctx.text || '')}
+                                    </p>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-500 dark:text-gray-400">
+                                        Page {ctx.page || 'N/A'}
+                                      </span>
+                                      <div className="flex items-center space-x-3">
+                                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium
+                                          ${getScoreClass(ctx.score)}`}>
+                                          {formatSimilarityScore(ctx.score)}% match
+                                        </span>
+                                        <button 
+                                          onClick={() => setExpandedContext(msg.context)}
+                                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 
+                                            dark:hover:text-blue-300 text-xs font-medium"
+                                        >
+                                          View details
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             ))}
                           </div>
