@@ -1177,6 +1177,10 @@ export default function Home() {
     })
   }
 
+  const handleUpdateChatHistory = (newHistory) => {
+    setChatHistory(newHistory)
+  }
+
   return (
     <main className="flex min-h-screen bg-gray-50">
       <Notification 
@@ -1403,8 +1407,9 @@ export default function Home() {
         chatHistory={chatHistory}
         chatInput={chatInput}
         setChatInput={setChatInput}
-        handleChat={() => handleChat()} // Call without arguments to use chatInput state
+        handleChat={handleChat}
         isChatLoading={isChatLoading}
+        onUpdateChatHistory={handleUpdateChatHistory}
       />
 
       <DocumentQA 

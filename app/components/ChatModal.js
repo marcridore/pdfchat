@@ -1,10 +1,16 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import { researchService } from '../lib/researchService'
+import ResearchModal from './ResearchModal'
 
-export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput = '', setChatInput, handleChat, isChatLoading }) {
+export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput = '', setChatInput, handleChat, isChatLoading, onUpdateChatHistory }) {
   const [expandedContext, setExpandedContext] = useState(null)
+  const [selectedPaper, setSelectedPaper] = useState(null)
+  const [currentPaperIndex, setCurrentPaperIndex] = useState(0)
+  const [currentPapers, setCurrentPapers] = useState(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const [isSearching, setIsSearching] = useState(false)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -19,6 +25,91 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
     if (chatInput.trim()) {
       handleChat()
     }
+  }
+
+  // Update the research results formatting
+  const formatResearchResult = (paper) => (
+    `🔍 Research Paper:\n` +
+    `Title: ${paper.title}\n` +
+    `Authors: ${paper.authors}\n` +
+    `Summary: ${paper.summary.slice(0, 200)}... ` +
+    `[Click to read more]`
+  )
+
+  // In the message rendering section, update the research results to be clickable
+  const renderMessage = (msg) => {
+    if (msg.role === 'assistant' && msg.content.includes('🔍 Research Paper:')) {
+      const papers = msg.content
+        .split('🔍 Research Paper:')
+        .slice(1) // Remove the first empty element
+        .map(p => {
+          try {
+            const lines = p.trim().split('\n')
+            const paperData = {}
+            
+            // Safely extract data using regex
+            lines.forEach(line => {
+              if (line.startsWith('Title: ')) {
+                paperData.title = line.replace('Title: ', '')
+              } else if (line.startsWith('Authors: ')) {
+                paperData.authors = line.replace('Authors: ', '')
+              } else if (line.startsWith('Summary: ')) {
+                paperData.summary = line.replace('Summary: ', '')
+              } else if (line.startsWith('Link: ')) {
+                paperData.link = line.replace('Link: ', '')
+              }
+            })
+
+            // Verify all required fields are present
+            if (!paperData.title || !paperData.summary) {
+              console.warn('Invalid paper data:', paperData)
+              return null
+            }
+
+            return paperData
+          } catch (error) {
+            console.error('Error parsing paper data:', error)
+            return null
+          }
+        })
+        .filter(Boolean) // Remove any null entries
+
+      if (papers.length === 0) {
+        return <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+      }
+
+      return (
+        <div>
+          <p className="mb-4">Here are some relevant research papers from arXiv:</p>
+          {papers.map((paper, idx) => (
+            <div 
+              key={idx}
+              onClick={() => handlePaperClick(paper, papers, idx)}
+              className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg cursor-pointer 
+                hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <h4 className="font-medium text-gray-900 dark:text-white mb-2">{paper.title}</h4>
+              {paper.authors && (
+                <p className="text-sm text-gray-600 dark:text-gray-300">{paper.authors}</p>
+              )}
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                {paper.summary.slice(0, 200)}...
+                <span className="text-blue-500 hover:text-blue-600 ml-1">
+                  Read more
+                </span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+  }
+
+  const handlePaperClick = (paper, papers, index) => {
+    setSelectedPaper(paper)
+    setCurrentPapers(papers)
+    setCurrentPaperIndex(index)
   }
 
   return (
@@ -105,7 +196,7 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
 
                     {/* Message content */}
                     <div className={msg.role === 'user' ? 'text-white' : 'text-gray-800 dark:text-gray-200'}>
-                      <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                      {renderMessage(msg)}
 
                       {/* Sources section for AI responses */}
                       {msg.role === 'assistant' && msg.context && (
@@ -140,6 +231,88 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
                             ))}
                           </div>
                         </div>
+                      )}
+
+                      {msg.role === 'user' && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              setIsSearching(true)
+                              const results = await researchService.searchArxiv(msg.content)
+                              if (results && results.length > 0) {
+                                const formattedResponse = results
+                                  .filter(r => r.title && r.summary)
+                                  .map(r => (
+                                    `🔍 Research Paper:\n` +
+                                    `Title: ${r.title}\n` +
+                                    `Authors: ${r.authors}\n` +
+                                    `Summary: ${r.summary}\n` +
+                                    `Link: ${r.link}`
+                                  ))
+                                  .join('\n\n')
+
+                                const researchMessage = {
+                                  role: 'assistant',
+                                  content: `Here are some relevant research papers from arXiv:\n\n${formattedResponse}`
+                                }
+
+                                if (handleChat && typeof handleChat === 'function') {
+                                  const updatedHistory = [...chatHistory, researchMessage]
+                                  onUpdateChatHistory(updatedHistory)
+                                }
+                              } else {
+                                console.log('No relevant research results found')
+                              }
+                            } catch (error) {
+                              console.error('Research failed:', error)
+                            } finally {
+                              setIsSearching(false)
+                            }
+                          }}
+                          disabled={isSearching}
+                          className="mt-3 flex items-center gap-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/30 
+                            text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-200 
+                            dark:hover:bg-purple-900/50 transition-colors group disabled:opacity-50 
+                            disabled:cursor-not-allowed"
+                        >
+                          {isSearching ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-current border-t-transparent 
+                                rounded-full animate-spin"/>
+                              <span className="font-medium">Searching...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg 
+                                className="w-4 h-4 group-hover:scale-110 transition-transform" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                viewBox="0 0 24 24"
+                              >
+                                <path 
+                                  strokeLinecap="round" 
+                                  strokeLinejoin="round" 
+                                  strokeWidth={2} 
+                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+                                />
+                              </svg>
+                              <span className="font-medium">Find Research Papers</span>
+                              <svg 
+                                className="w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                viewBox="0 0 24 24"
+                              >
+                                <path 
+                                  strokeLinecap="round" 
+                                  strokeLinejoin="round" 
+                                  strokeWidth={2} 
+                                  d="M9 5l7 7-7 7"
+                                />
+                              </svg>
+                            </>
+                          )}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -193,6 +366,24 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
       {/* Context Modal */}
       {expandedContext && (
         <ContextModal context={expandedContext} onClose={() => setExpandedContext(null)} />
+      )}
+
+      {/* Research Paper Modal */}
+      {selectedPaper && (
+        <ResearchModal 
+          paper={selectedPaper}
+          papers={currentPapers}
+          currentIndex={currentPaperIndex}
+          onNavigate={(newIndex) => {
+            setCurrentPaperIndex(newIndex)
+            setSelectedPaper(currentPapers[newIndex])
+          }}
+          onClose={() => {
+            setSelectedPaper(null)
+            setCurrentPapers(null)
+            setCurrentPaperIndex(0)
+          }}
+        />
       )}
     </div>
   )
