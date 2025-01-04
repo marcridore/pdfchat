@@ -207,11 +207,11 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
                               <div key={ctxIdx} 
                                 className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-sm">
                                 <p className="text-gray-700 dark:text-gray-300 mb-2">
-                                  {truncateText(ctx.text)}
+                                  {truncateText(ctx.text || '')}
                                 </p>
                                 <div className="flex items-center justify-between">
                                   <span className="text-gray-500 dark:text-gray-400">
-                                    Page {ctx.page}
+                                    Page {ctx.page || 'N/A'}
                                   </span>
                                   <div className="flex items-center space-x-3">
                                     <span className={`px-2.5 py-1 rounded-lg text-xs font-medium
@@ -391,10 +391,12 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
 
 // Helper functions remain the same
 function truncateText(text, maxLength = 150) {
+  if (!text) return '';
   return text.length <= maxLength ? text : text.slice(0, maxLength) + '...'
 }
 
 function getScoreClass(score) {
+  if (typeof score !== 'number') return 'bg-gray-100 dark:bg-gray-900/50 text-gray-700 dark:text-gray-300';
   if (score > 0.7) return 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
   if (score > 0.4) return 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300'
   return 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
@@ -407,6 +409,8 @@ function formatSimilarityScore(score) {
 
 // Enhanced Context Modal
 function ContextModal({ context, onClose }) {
+  if (!context || !Array.isArray(context)) return null;
+  
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-2xl w-full mx-4 
@@ -423,9 +427,13 @@ function ContextModal({ context, onClose }) {
         <div className="space-y-4">
           {context.map((ctx, idx) => (
             <div key={idx} className="p-5 bg-gray-50 dark:bg-gray-800 rounded-xl">
-              <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{ctx.text}</p>
+              <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                {truncateText(ctx.text || '')}
+              </p>
               <div className="mt-3 flex justify-between items-center text-sm">
-                <span className="text-gray-500 dark:text-gray-400">Page {ctx.page}</span>
+                <span className="text-gray-500 dark:text-gray-400">
+                  Page {ctx.page || 'N/A'}
+                </span>
                 <span className={`px-3 py-1 rounded-lg ${getScoreClass(ctx.score)}`}>
                   Match: {formatSimilarityScore(ctx.score)}%
                 </span>

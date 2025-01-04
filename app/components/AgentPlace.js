@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import ChatModal from './ChatModal'
 import { motion } from 'framer-motion'
+import { researchService } from '../lib/researchService'
 
 // Sample agent data - in production this would come from an API/database
 const agents = [
@@ -41,6 +42,41 @@ const agents = [
 
 // All possible tasks for autocomplete
 const allTasks = agents.reduce((acc, agent) => [...acc, ...agent.tasks], [])
+
+// Define agent-specific handlers
+const agentHandlers = {
+  'Research Assistant': async (message, chatHistory) => {
+    try {
+      // Use the dedicated research agent API route
+      const response = await fetch('/api/agents/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      })
+
+      if (!response.ok) throw new Error('Failed to get AI response')
+      
+      const data = await response.json()
+      return {
+        response: data.response,
+        context: data.context
+      }
+    } catch (error) {
+      console.error('Research Assistant error:', error)
+      throw error
+    }
+  },
+
+  'Data Analyst': async (message, chatHistory) => {
+    // Implement data analysis specific logic
+    // This would connect to a different API route for data analysis tasks
+  },
+
+  'Writing Assistant': async (message, chatHistory) => {
+    // Implement writing assistance specific logic
+    // This would use a different prompt and potentially different models
+  }
+}
 
 export default function AgentPlace() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -87,20 +123,36 @@ export default function AgentPlace() {
   }
 
   const handleChat = async () => {
-    if (!chatInput.trim()) return
+    if (!chatInput.trim() || !selectedAgent) return
 
     const newMessage = { role: 'user', content: chatInput }
     setChatHistory([...chatHistory, newMessage])
     setChatInput('')
     
-    // Here you would typically make an API call to get the agent's response
-    // For now, we'll just echo a simple response
-    setTimeout(() => {
+    try {
+      // Get the appropriate handler for the selected agent
+      const handler = agentHandlers[selectedAgent.name]
+      if (!handler) {
+        throw new Error(`No handler found for agent: ${selectedAgent.name}`)
+      }
+
+      // Process the message using the agent-specific handler
+      const result = await handler(chatInput, chatHistory)
+
+      // Update chat history with the response
       setChatHistory(prev => [...prev, {
         role: 'assistant',
-        content: `I'm processing your request: "${chatInput}"`
+        content: result.response,
+        context: result.context
       }])
-    }, 1000)
+
+    } catch (error) {
+      console.error('Chat error:', error)
+      setChatHistory(prev => [...prev, {
+        role: 'assistant',
+        content: 'I encountered an error processing your request. Please try again.'
+      }])
+    }
   }
 
   return (
