@@ -13,6 +13,7 @@
     "@pinecone-database/pinecone": "^4.0.0",
     "@supabase/supabase-js": "^2.47.10",
     "fast-xml-parser": "^4.5.1",
+    "framer-motion": "^11.15.0",
     "jsdom": "^25.0.1",
     "jspdf": "^2.5.2",
     "next": "15.1.3",
