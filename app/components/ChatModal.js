@@ -211,29 +211,65 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
                                 {/* Research Paper Format */}
                                 {ctx.authors ? (
                                   <>
-                                    <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-1">
-                                      {ctx.title}
-                                    </h4>
-                                    <p className="text-gray-600 dark:text-gray-400 text-xs mb-2">
-                                      {ctx.authors}
-                                    </p>
-                                    <p className="text-gray-700 dark:text-gray-300 mb-3 text-sm">
-                                      {truncateText(ctx.summary || '', 200)}
-                                    </p>
-                                    <div className="flex items-center justify-between">
-                                      <a 
-                                        href={ctx.link}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 dark:text-blue-400 hover:underline text-xs flex items-center gap-1"
-                                      >
-                                        View on arXiv
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" 
-                                          />
-                                        </svg>
-                                      </a>
+                                    <div className="flex flex-col space-y-3">
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                          <h4 className="font-semibold text-gray-900 dark:text-gray-100 
+                                            leading-tight hover:text-blue-600 dark:hover:text-blue-400 
+                                            transition-colors duration-200">
+                                            {ctx.title}
+                                          </h4>
+                                          <p className="text-gray-600 dark:text-gray-400 text-xs mt-1.5 
+                                            font-medium tracking-wide">
+                                            {ctx.authors}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      
+                                      <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed
+                                        bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg">
+                                        {truncateText(ctx.summary || '', 200)}
+                                      </p>
+                                      
+                                      <div className="flex items-center justify-between pt-2 border-t 
+                                        border-gray-200 dark:border-gray-700">
+                                        <div className="flex items-center gap-4">
+                                          <a 
+                                            href={ctx.link}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                              text-blue-600 dark:text-blue-400 hover:bg-blue-50 
+                                              dark:hover:bg-blue-900/20 rounded-full transition-all duration-200
+                                              border border-blue-200 dark:border-blue-800"
+                                          >
+                                            View on arXiv
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" 
+                                              />
+                                            </svg>
+                                          </a>
+                                          <a 
+                                            href={`${ctx.link.replace('abs', 'pdf')}.pdf`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                              text-green-600 dark:text-green-400 hover:bg-green-50
+                                              dark:hover:bg-green-900/20 rounded-full transition-all duration-200
+                                              border border-green-200 dark:border-green-800 group"
+                                          >
+                                            Download PDF
+                                            <svg className="w-3 h-3 transition-transform duration-200 
+                                              group-hover:translate-y-0.5" 
+                                              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                                />
+                                              </svg>
+                                          </a>
+                                        </div>
+                                      </div>
                                     </div>
                                   </>
                                 ) : (
