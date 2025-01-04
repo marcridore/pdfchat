@@ -86,6 +86,7 @@ export default function AgentPlace() {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [chatHistory, setChatHistory] = useState([])
   const [chatInput, setChatInput] = useState('')
+  const [isLoadingPapers, setIsLoadingPapers] = useState(false)
 
   // Filter agents based on search query
   useEffect(() => {
@@ -136,6 +137,9 @@ export default function AgentPlace() {
         throw new Error(`No handler found for agent: ${selectedAgent.name}`)
       }
 
+      // Set loading state
+      setIsLoadingPapers(true)
+
       // Process the message using the agent-specific handler
       const result = await handler(chatInput, chatHistory)
 
@@ -152,6 +156,8 @@ export default function AgentPlace() {
         role: 'assistant',
         content: 'I encountered an error processing your request. Please try again.'
       }])
+    } finally {
+      setIsLoadingPapers(false)
     }
   }
 
@@ -268,7 +274,7 @@ export default function AgentPlace() {
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleChat={handleChat}
-          isChatLoading={false}
+          isChatLoading={isLoadingPapers}
         />
       )}
     </div>

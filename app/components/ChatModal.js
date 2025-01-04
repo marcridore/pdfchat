@@ -8,6 +8,7 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
   const [selectedPaper, setSelectedPaper] = useState(null)
   const [currentPaperIndex, setCurrentPaperIndex] = useState(0)
   const [currentPapers, setCurrentPapers] = useState(null)
+  const [isLoadingPapers, setIsLoadingPapers] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const [isSearching, setIsSearching] = useState(false)
@@ -113,349 +114,362 @@ export default function ChatModal({ isOpen, onClose, chatHistory = [], chatInput
   }
 
   return (
-    <div className={`fixed inset-0 ${isOpen ? 'flex' : 'hidden'} items-center justify-center z-50`}>
-      {/* Backdrop with modern blur effect */}
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      
-      {/* Main Chat Container */}
-      <div className="relative bg-white dark:bg-gray-900 w-full max-w-4xl mx-4 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[85vh]">
-        {/* Header with gradient */}
-        <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="p-2 bg-white/10 rounded-xl">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" 
-                />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-white">Document Chat</h2>
-              <p className="text-sm text-blue-100 opacity-90">Ask anything about your PDF</p>
-            </div>
-          </div>
-          <button onClick={onClose} 
-            className="p-2 hover:bg-white/10 rounded-xl transition-colors duration-200">
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Messages Container */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50 dark:bg-gray-800">
-          {chatHistory.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
-              <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-50 
+      ${isOpen ? 'flex' : 'hidden'} items-center justify-center`}>
+      <div className="bg-gradient-to-b from-blue-600 to-blue-700 rounded-2xl 
+        w-full max-w-4xl mx-4 shadow-xl overflow-hidden">
+        {/* Backdrop with modern blur effect */}
+        <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+        
+        {/* Main Chat Container */}
+        <div className="relative bg-white dark:bg-gray-900 w-full max-w-4xl mx-4 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[85vh]">
+          {/* Header with gradient */}
+          <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="p-2 bg-white/10 rounded-xl">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" 
                   />
                 </svg>
               </div>
               <div>
-                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200">No messages yet</h3>
-                <p className="text-gray-500 dark:text-gray-400 mt-1">Start by asking a question about your document</p>
+                <h2 className="text-xl font-semibold text-white">Document Chat</h2>
+                <p className="text-sm text-blue-100 opacity-90">Ask anything about your PDF</p>
               </div>
             </div>
-          ) : (
-            <div className="space-y-6">
-              {chatHistory.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] ${
-                    msg.role === 'user' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-white dark:bg-gray-700 shadow-sm'
-                  } rounded-2xl px-6 py-4`}>
-                    {/* Message header */}
-                    <div className="flex items-center space-x-2 mb-2">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center 
-                        ${msg.role === 'user' 
-                          ? 'bg-white/20' 
-                          : 'bg-blue-100 dark:bg-blue-900'}`}>
-                        {msg.role === 'user' ? (
-                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" 
-                            />
-                          </svg>
-                        )}
-                      </div>
-                      <span className={`text-sm ${
-                        msg.role === 'user' 
-                          ? 'text-blue-100' 
-                          : 'text-gray-500 dark:text-gray-400'
-                      }`}>
-                        {msg.role === 'user' ? 'You' : 'AI Assistant'}
-                      </span>
-                    </div>
-
-                    {/* Message content */}
-                    <div className={msg.role === 'user' ? 'text-white' : 'text-gray-800 dark:text-gray-200'}>
-                      {renderMessage(msg)}
-
-                      {/* Sources section for AI responses */}
-                      {msg.role === 'assistant' && msg.context && (
-                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">
-                            {msg.context[0]?.authors ? 'Research Papers' : 'Sources'}
-                          </p>
-                          <div className="space-y-3">
-                            {msg.context.map((ctx, ctxIdx) => (
-                              <div key={ctxIdx} 
-                                className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-sm">
-                                {/* Research Paper Format */}
-                                {ctx.authors ? (
-                                  <>
-                                    <div className="flex flex-col space-y-3">
-                                      <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                          <h4 className="font-semibold text-gray-900 dark:text-gray-100 
-                                            leading-tight hover:text-blue-600 dark:hover:text-blue-400 
-                                            transition-colors duration-200">
-                                            {ctx.title}
-                                          </h4>
-                                          <p className="text-gray-600 dark:text-gray-400 text-xs mt-1.5 
-                                            font-medium tracking-wide">
-                                            {ctx.authors}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      
-                                      <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed
-                                        bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg">
-                                        {truncateText(ctx.summary || '', 200)}
-                                      </p>
-                                      
-                                      <div className="flex items-center justify-between pt-2 border-t 
-                                        border-gray-200 dark:border-gray-700">
-                                        <div className="flex items-center gap-4">
-                                          <a 
-                                            href={ctx.link}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
-                                              text-blue-600 dark:text-blue-400 hover:bg-blue-50 
-                                              dark:hover:bg-blue-900/20 rounded-full transition-all duration-200
-                                              border border-blue-200 dark:border-blue-800"
-                                          >
-                                            View on arXiv
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" 
-                                              />
-                                            </svg>
-                                          </a>
-                                          <a 
-                                            href={`${ctx.link.replace('abs', 'pdf')}.pdf`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
-                                              text-green-600 dark:text-green-400 hover:bg-green-50
-                                              dark:hover:bg-green-900/20 rounded-full transition-all duration-200
-                                              border border-green-200 dark:border-green-800 group"
-                                          >
-                                            Download PDF
-                                            <svg className="w-3 h-3 transition-transform duration-200 
-                                              group-hover:translate-y-0.5" 
-                                              fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                                                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                                                />
-                                              </svg>
-                                          </a>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </>
-                                ) : (
-                                  // Original Source Format
-                                  <>
-                                    <p className="text-gray-700 dark:text-gray-300 mb-2">
-                                      {truncateText(ctx.text || '')}
-                                    </p>
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-gray-500 dark:text-gray-400">
-                                        Page {ctx.page || 'N/A'}
-                                      </span>
-                                      <div className="flex items-center space-x-3">
-                                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium
-                                          ${getScoreClass(ctx.score)}`}>
-                                          {formatSimilarityScore(ctx.score)}% match
-                                        </span>
-                                        <button 
-                                          onClick={() => setExpandedContext(msg.context)}
-                                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 
-                                            dark:hover:text-blue-300 text-xs font-medium"
-                                        >
-                                          View details
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.role === 'user' && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              setIsSearching(true)
-                              const results = await researchService.searchArxiv(msg.content)
-                              if (results && results.length > 0) {
-                                const formattedResponse = results
-                                  .filter(r => r.title && r.summary)
-                                  .map(r => (
-                                    `🔍 Research Paper:\n` +
-                                    `Title: ${r.title}\n` +
-                                    `Authors: ${r.authors}\n` +
-                                    `Summary: ${r.summary}\n` +
-                                    `Link: ${r.link}`
-                                  ))
-                                  .join('\n\n')
-
-                                const researchMessage = {
-                                  role: 'assistant',
-                                  content: `Here are some relevant research papers from arXiv:\n\n${formattedResponse}`
-                                }
-
-                                if (handleChat && typeof handleChat === 'function') {
-                                  const updatedHistory = [...chatHistory, researchMessage]
-                                  onUpdateChatHistory(updatedHistory)
-                                }
-                              } else {
-                                console.log('No relevant research results found')
-                              }
-                            } catch (error) {
-                              console.error('Research failed:', error)
-                            } finally {
-                              setIsSearching(false)
-                            }
-                          }}
-                          disabled={isSearching}
-                          className="mt-3 flex items-center gap-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/30 
-                            text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-200 
-                            dark:hover:bg-purple-900/50 transition-colors group disabled:opacity-50 
-                            disabled:cursor-not-allowed"
-                        >
-                          {isSearching ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-current border-t-transparent 
-                                rounded-full animate-spin"/>
-                              <span className="font-medium">Searching...</span>
-                            </>
-                          ) : (
-                            <>
-                              <svg 
-                                className="w-4 h-4 group-hover:scale-110 transition-transform" 
-                                fill="none" 
-                                stroke="currentColor" 
-                                viewBox="0 0 24 24"
-                              >
-                                <path 
-                                  strokeLinecap="round" 
-                                  strokeLinejoin="round" 
-                                  strokeWidth={2} 
-                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
-                                />
-                              </svg>
-                              <span className="font-medium">Find Research Papers</span>
-                              <svg 
-                                className="w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" 
-                                fill="none" 
-                                stroke="currentColor" 
-                                viewBox="0 0 24 24"
-                              >
-                                <path 
-                                  strokeLinecap="round" 
-                                  strokeLinejoin="round" 
-                                  strokeWidth={2} 
-                                  d="M9 5l7 7-7 7"
-                                />
-                              </svg>
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Section */}
-        <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center space-x-3">
-            <div className="relative flex-1">
-              <input
-                ref={inputRef}
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask a question..."
-                className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-800 rounded-xl 
-                  focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-gray-700
-                  border-0 text-gray-800 dark:text-gray-200 placeholder-gray-500
-                  dark:placeholder-gray-400 transition-all duration-200"
-                onKeyPress={(e) => e.key === 'Enter' && !isChatLoading && handleChat()}
-              />
-              {isChatLoading && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent 
-                    rounded-full animate-spin" />
-                </div>
-              )}
-            </div>
-            <button
-              onClick={handleSubmit}
-              disabled={isChatLoading || !chatInput.trim()}
-              className="px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
-                text-white rounded-xl font-medium flex items-center space-x-2
-                transition-colors duration-200 disabled:cursor-not-allowed"
-            >
-              <span>Send</span>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                  d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            <button onClick={onClose} 
+              className="p-2 hover:bg-white/10 rounded-xl transition-colors duration-200">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
+
+          {/* Messages Container */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50 dark:bg-gray-800">
+            {chatHistory.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
+                  <svg className="w-10 h-10 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200">No messages yet</h3>
+                  <p className="text-gray-500 dark:text-gray-400 mt-1">Start by asking a question about your document</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] ${
+                      msg.role === 'user' 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-white dark:bg-gray-700 shadow-sm'
+                    } rounded-2xl px-6 py-4`}>
+                      {/* Message header */}
+                      <div className="flex items-center space-x-2 mb-2">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center 
+                          ${msg.role === 'user' 
+                            ? 'bg-white/20' 
+                            : 'bg-blue-100 dark:bg-blue-900'}`}>
+                          {msg.role === 'user' ? (
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" 
+                              />
+                            </svg>
+                          )}
+                        </div>
+                        <span className={`text-sm ${
+                          msg.role === 'user' 
+                            ? 'text-blue-100' 
+                            : 'text-gray-500 dark:text-gray-400'
+                        }`}>
+                          {msg.role === 'user' ? 'You' : 'AI Assistant'}
+                        </span>
+                      </div>
+
+                      {/* Message content */}
+                      <div className={msg.role === 'user' ? 'text-white' : 'text-gray-800 dark:text-gray-200'}>
+                        {renderMessage(msg)}
+
+                        {/* Sources section for AI responses */}
+                        {msg.role === 'assistant' && msg.context && (
+                          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                {msg.context[0]?.authors ? 'Research Papers' : 'Sources'}
+                              </p>
+                              {isLoadingPapers && (
+                                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                                  <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 
+                                    rounded-full animate-spin"/>
+                                  <span>Searching papers...</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="space-y-3">
+                              {msg.context.map((ctx, ctxIdx) => (
+                                <div key={ctxIdx} 
+                                  className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-sm">
+                                  {/* Research Paper Format */}
+                                  {ctx.authors ? (
+                                    <>
+                                      <div className="flex flex-col space-y-3">
+                                        <div className="flex items-start justify-between">
+                                          <div className="flex-1">
+                                            <h4 className="font-semibold text-gray-900 dark:text-gray-100 
+                                              leading-tight hover:text-blue-600 dark:hover:text-blue-400 
+                                              transition-colors duration-200">
+                                              {ctx.title}
+                                            </h4>
+                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1.5 
+                                              font-medium tracking-wide">
+                                              {ctx.authors}
+                                            </p>
+                                          </div>
+                                        </div>
+                                        
+                                        <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed
+                                          bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg">
+                                          {truncateText(ctx.summary || '', 200)}
+                                        </p>
+                                        
+                                        <div className="flex items-center justify-between pt-2 border-t 
+                                          border-gray-200 dark:border-gray-700">
+                                          <div className="flex items-center gap-4">
+                                            <a 
+                                              href={ctx.link}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                                text-blue-600 dark:text-blue-400 hover:bg-blue-50 
+                                                dark:hover:bg-blue-900/20 rounded-full transition-all duration-200
+                                                border border-blue-200 dark:border-blue-800"
+                                            >
+                                              View on arXiv
+                                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" 
+                                                />
+                                              </svg>
+                                            </a>
+                                            <a 
+                                              href={`${ctx.link.replace('abs', 'pdf')}.pdf`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                                text-green-600 dark:text-green-400 hover:bg-green-50
+                                                dark:hover:bg-green-900/20 rounded-full transition-all duration-200
+                                                border border-green-200 dark:border-green-800 group"
+                                            >
+                                              Download PDF
+                                              <svg className="w-3 h-3 transition-transform duration-200 
+                                                group-hover:translate-y-0.5" 
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                                  />
+                                                </svg>
+                                            </a>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    // Original Source Format
+                                    <>
+                                      <p className="text-gray-700 dark:text-gray-300 mb-2">
+                                        {truncateText(ctx.text || '')}
+                                      </p>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-gray-500 dark:text-gray-400">
+                                          Page {ctx.page || 'N/A'}
+                                        </span>
+                                        <div className="flex items-center space-x-3">
+                                          <span className={`px-2.5 py-1 rounded-lg text-xs font-medium
+                                            ${getScoreClass(ctx.score)}`}>
+                                            {formatSimilarityScore(ctx.score)}% match
+                                          </span>
+                                          <button 
+                                            onClick={() => setExpandedContext(msg.context)}
+                                            className="text-blue-600 dark:text-blue-400 hover:text-blue-700 
+                                              dark:hover:text-blue-300 text-xs font-medium"
+                                          >
+                                            View details
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {msg.role === 'user' && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                setIsSearching(true)
+                                const results = await researchService.searchArxiv(msg.content)
+                                if (results && results.length > 0) {
+                                  const formattedResponse = results
+                                    .filter(r => r.title && r.summary)
+                                    .map(r => (
+                                      `🔍 Research Paper:\n` +
+                                      `Title: ${r.title}\n` +
+                                      `Authors: ${r.authors}\n` +
+                                      `Summary: ${r.summary}\n` +
+                                      `Link: ${r.link}`
+                                    ))
+                                    .join('\n\n')
+
+                                  const researchMessage = {
+                                    role: 'assistant',
+                                    content: `Here are some relevant research papers from arXiv:\n\n${formattedResponse}`
+                                  }
+
+                                  if (handleChat && typeof handleChat === 'function') {
+                                    const updatedHistory = [...chatHistory, researchMessage]
+                                    onUpdateChatHistory(updatedHistory)
+                                  }
+                                } else {
+                                  console.log('No relevant research results found')
+                                }
+                              } catch (error) {
+                                console.error('Research failed:', error)
+                              } finally {
+                                setIsSearching(false)
+                              }
+                            }}
+                            disabled={isSearching}
+                            className="mt-3 flex items-center gap-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/30 
+                              text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-200 
+                              dark:hover:bg-purple-900/50 transition-colors group disabled:opacity-50 
+                              disabled:cursor-not-allowed"
+                          >
+                            {isSearching ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-current border-t-transparent 
+                                  rounded-full animate-spin"/>
+                                <span className="font-medium">Searching...</span>
+                              </>
+                            ) : (
+                              <>
+                                <svg 
+                                  className="w-4 h-4 group-hover:scale-110 transition-transform" 
+                                  fill="none" 
+                                  stroke="currentColor" 
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path 
+                                    strokeLinecap="round" 
+                                    strokeLinejoin="round" 
+                                    strokeWidth={2} 
+                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+                                  />
+                                </svg>
+                                <span className="font-medium">Find Research Papers</span>
+                                <svg 
+                                  className="w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" 
+                                  fill="none" 
+                                  stroke="currentColor" 
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path 
+                                    strokeLinecap="round" 
+                                    strokeLinejoin="round" 
+                                    strokeWidth={2} 
+                                    d="M9 5l7 7-7 7"
+                                  />
+                                </svg>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Input Section */}
+          <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex items-center space-x-3">
+              <div className="relative flex-1">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask a question..."
+                  className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-800 rounded-xl 
+                    focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-gray-700
+                    border-0 text-gray-800 dark:text-gray-200 placeholder-gray-500
+                    dark:placeholder-gray-400 transition-all duration-200"
+                  onKeyPress={(e) => e.key === 'Enter' && !isChatLoading && handleChat()}
+                />
+                {isChatLoading && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent 
+                      rounded-full animate-spin" />
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={handleSubmit}
+                disabled={isChatLoading || !chatInput.trim()}
+                className="px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
+                  text-white rounded-xl font-medium flex items-center space-x-2
+                  transition-colors duration-200 disabled:cursor-not-allowed"
+              >
+                <span>Send</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Context Modal */}
+        {expandedContext && (
+          <ContextModal context={expandedContext} onClose={() => setExpandedContext(null)} />
+        )}
+
+        {/* Research Paper Modal */}
+        {selectedPaper && (
+          <ResearchModal 
+            paper={selectedPaper}
+            papers={currentPapers}
+            currentIndex={currentPaperIndex}
+            onNavigate={(newIndex) => {
+              setCurrentPaperIndex(newIndex)
+              setSelectedPaper(currentPapers[newIndex])
+            }}
+            onClose={() => {
+              setSelectedPaper(null)
+              setCurrentPapers(null)
+              setCurrentPaperIndex(0)
+            }}
+          />
+        )}
       </div>
-
-      {/* Context Modal */}
-      {expandedContext && (
-        <ContextModal context={expandedContext} onClose={() => setExpandedContext(null)} />
-      )}
-
-      {/* Research Paper Modal */}
-      {selectedPaper && (
-        <ResearchModal 
-          paper={selectedPaper}
-          papers={currentPapers}
-          currentIndex={currentPaperIndex}
-          onNavigate={(newIndex) => {
-            setCurrentPaperIndex(newIndex)
-            setSelectedPaper(currentPapers[newIndex])
-          }}
-          onClose={() => {
-            setSelectedPaper(null)
-            setCurrentPapers(null)
-            setCurrentPaperIndex(0)
-          }}
-        />
-      )}
     </div>
   )
 }
